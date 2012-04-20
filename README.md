@@ -9,10 +9,11 @@ When compiling commenting out EXPOSE_DIRECT_RESOURCES causes direct resource acc
 
 The interface is as follows:
 
-    class PEFile {
-        PEFile(LPVOID data, size_t size, bool readonly = false); // data is freed when the PEFile is deleted
-        PEFile(LPCWSTR filename, bool readonly = false);
-        ~PEFile();
+    class PE::File {
+    public:
+        File(LPVOID data, size_t size, bool readonly = false); // data is freed when the PEFile is deleted
+        File(LPCWSTR filename, bool readonly = false);
+        ~File();
         bool isLoaded() const;
         bool isReadOnly() const;
 
