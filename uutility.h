@@ -9,6 +9,8 @@
 #include "ulimits.h"
 #include <assert.h>
 
+namespace ustl {
+
 template <typename T1, typename T2> inline T1 min(const T1& a, const T2& b) { return (a < b ? a : b); }
 template <typename T1, typename T2> inline T1 max(const T1& a, const T2& b) { return (b < a ? a : b); }
 
@@ -45,3 +47,4 @@ template <typename T> inline bool operator!=(const T& x, const T& y) { return !(
 template <typename T> inline bool operator> (const T& x, const T& y) { return   y < x;  }
 template <typename T> inline bool operator<=(const T& x, const T& y) { return !(y < x); }
 template <typename T> inline bool operator>=(const T& x, const T& y) { return !(x < y); }
+}

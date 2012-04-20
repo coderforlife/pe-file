@@ -6,6 +6,8 @@
 
 #include "utypes.h"
 
+namespace ustl {
+
 template <typename T1, typename T2>
 class pair {
 public:
@@ -30,3 +32,5 @@ inline bool operator==(const pair<T1,T2>& a, const pair<T1,T2>& b) { return a.fi
 
 template <typename T1, typename T2>
 inline bool operator<(const pair<T1,T2>& a, const pair<T1,T2>& b) { return a.first < b.first || a.first == b.first && a.second < b.second; }
+
+}

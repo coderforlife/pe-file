@@ -9,6 +9,7 @@
 #include "umemory.h"
 //#include "upredalgo.h"
 
+namespace ustl {
 
 //TODO: the iterators do not become 'invalidated' ever
 
@@ -25,8 +26,8 @@ public:
 	typedef const value_type*	const_pointer;
 	typedef pointer				iterator;
 	typedef const_pointer		const_iterator;
-	typedef ::reverse_iterator<iterator>		reverse_iterator;
-	typedef ::reverse_iterator<const_iterator>	const_reverse_iterator;
+	typedef ustl::reverse_iterator<iterator>		reverse_iterator;
+	typedef ustl::reverse_iterator<const_iterator>	const_reverse_iterator;
 protected:
 	typedef vector<T>&			my_ref;
 	typedef const vector<T>&	const_my_ref;
@@ -242,3 +243,5 @@ inline void vector<T>::swap(vector<T>& v) {
 }
 
 // TODO: optimized version for vector<bool>
+
+}

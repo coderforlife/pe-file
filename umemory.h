@@ -14,6 +14,8 @@
 #include "uiterator.h"
 #include "ulimits.h"
 
+namespace ustl {
+
 template <typename T>
 class auto_ptr {
 public:
@@ -82,4 +84,6 @@ template <typename ForwardIterator>
 inline void destroy (ForwardIterator first, ForwardIterator last) throw() {
 	typedef typename iterator_traits<ForwardIterator>::value_type value_type;
 	Sdtorsr<ForwardIterator,numeric_limits<value_type>::is_integral>()(first, last);
+}
+
 }

@@ -5,6 +5,9 @@
 #pragma unmanaged
 #endif
 
+using namespace PE;
+using namespace ustl;
+
 // Raised when resources have a problem loading
 class ResLoadFailure {};
 static ResLoadFailure resLoadFailure;

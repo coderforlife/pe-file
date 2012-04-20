@@ -7,9 +7,11 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 
+namespace PE {
+
 #define LARGE_PATH 32767
 
-class PEFile {
+class File {
 protected:
 	IMAGE_DOS_HEADER *dosh;
 	LONG peOffset;
@@ -39,9 +41,9 @@ protected:
 	bool load(bool incRes);
 	void unload();
 public:
-	PEFile(LPVOID data, size_t size, bool readonly = false); // data is freed when the PEFile is deleted
-	PEFile(LPCWSTR filename, bool readonly = false);
-	~PEFile();
+	File(LPVOID data, size_t size, bool readonly = false); // data is freed when the PEFile is deleted
+	File(LPCWSTR filename, bool readonly = false);
+	~File();
 	bool isLoaded() const;
 	bool isReadOnly() const;
 
@@ -120,3 +122,5 @@ public:
 	static VS_FIXEDFILEINFO *GetVersionInfo(const LPVOID ver);
 	static void UnmapAllViewsOfFile(LPCWSTR file);
 };
+
+}

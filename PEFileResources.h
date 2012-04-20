@@ -22,6 +22,8 @@ class Rsrc;
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 
+namespace PE {
+
 // Functions / Macros used by both PEFile and PEFileResources
 #define RESID2WORD(ID) ((WORD)((ULONG_PTR)(ID)))
 template<unsigned int MULT> inline static size_t roundUpTo(size_t x) { size_t mod = x % MULT; return (mod == 0) ? x : (x + MULT - mod); }
@@ -41,12 +43,6 @@ private:
 	virtual size_t getHeaderSize() const = 0;
 	virtual size_t getThisHeaderSize() const = 0;
 };
-
-// Forward Declarations
-//class ResourceLang;
-//class ResourceName;
-//class ResourceType;
-//class Rsrc;
 
 // The final resource directory, contains the data for the resource
 class ResourceLang : Resource {
@@ -77,7 +73,7 @@ private:
 	void writeRESData(LPBYTE data, size_t& pos, LPCWSTR type, LPCWSTR name) const;
 };
 
-typedef map<WORD, ResourceLang*> LangMap;
+typedef ustl::map<WORD, ResourceLang*> LangMap;
 
 // The named resource directory, the second level
 class ResourceName : Resource {
@@ -105,7 +101,7 @@ public:
 	ResourceLang* operator[](WORD lang);
 	const ResourceLang* operator[](WORD lang) const;
 
-	vector<WORD> getLangs() const;
+	ustl::vector<WORD> getLangs() const;
 
 private:
 	bool cleanup();
@@ -119,7 +115,7 @@ private:
 	void writeRESData(LPBYTE data, size_t& pos, LPCWSTR type) const;
 };
 
-typedef map<LPWSTR, ResourceName*, ResCmp> NameMap;
+typedef ustl::map<LPWSTR, ResourceName*, ResCmp> NameMap;
 
 // The typed resource directory, the first level
 class ResourceType : Resource {
@@ -147,8 +143,8 @@ public:
 	ResourceName* operator[](LPCWSTR name);
 	const ResourceName* operator[](LPCWSTR name) const;
 
-	vector<LPCWSTR> getNames() const;
-	vector<WORD> getLangs(LPCWSTR name) const;
+	ustl::vector<LPCWSTR> getNames() const;
+	ustl::vector<WORD> getLangs(LPCWSTR name) const;
 
 private:
 	bool cleanup();
@@ -163,7 +159,7 @@ private:
 	void writeRESData(LPBYTE data, size_t& pos) const;
 };
 
-typedef map<LPWSTR, ResourceType*, ResCmp> TypeMap;
+typedef ustl::map<LPWSTR, ResourceType*, ResCmp> TypeMap;
 
 class Rsrc : Resource {
 	TypeMap types;
@@ -192,9 +188,9 @@ public:
 	ResourceType* operator[](LPCWSTR type);
 	const ResourceType* operator[](LPCWSTR type) const;
 
-	vector<LPCWSTR> getTypes() const;
-	vector<LPCWSTR> getNames(LPCWSTR type) const;
-	vector<WORD> getLangs(LPCWSTR type, LPCWSTR name) const;
+	ustl::vector<LPCWSTR> getTypes() const;
+	ustl::vector<LPCWSTR> getNames(LPCWSTR type) const;
+	ustl::vector<WORD> getLangs(LPCWSTR type, LPCWSTR name) const;
 
 	bool cleanup();
 	LPVOID compile(size_t* size, DWORD startVA); // calls cleanup
@@ -206,5 +202,7 @@ private:
 	virtual size_t getThisHeaderSize() const;
 	virtual size_t getRESSize() const;
 };
+
+}
 
 #endif

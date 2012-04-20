@@ -6,6 +6,8 @@
 
 #include "utypes.h"
 
+namespace ustl {
+
 #define __limits_digits(T)		(sizeof(T)*8)
 
 template <typename T> 
@@ -20,23 +22,23 @@ struct numeric_limits {
 
 template <typename T>
 struct numeric_limits<T*> {
-    static inline T* min() { return NULL; }
-    static inline T* max() { return reinterpret_cast<T*>(UINTPTR_MAX); }
-    static const bool is_signed = false;
-    static const bool is_integer = true;
-    static const bool is_integral = true;
-    static const unsigned digits = __limits_digits(T*);
+	static inline T* min() { return NULL; }
+	static inline T* max() { return reinterpret_cast<T*>(UINTPTR_MAX); }
+	static const bool is_signed = false;
+	static const bool is_integer = true;
+	static const bool is_integral = true;
+	static const unsigned digits = __limits_digits(T*);
 };
 
 #define NUMERIC_LIMITS(T, minVal, maxVal, bSigned, bInteger, bIntegral)	\
 template <>													\
 struct numeric_limits<T> {									\
-    static inline T min() { return minVal; }				\
-    static inline T max() { return maxVal; }				\
-    static const bool is_signed = bSigned;					\
-    static const bool is_integer = bInteger;				\
-    static const bool is_integral = bIntegral;				\
-    static const unsigned digits = __limits_digits(T);		\
+	static inline T min() { return minVal; }				\
+	static inline T max() { return maxVal; }				\
+	static const bool is_signed = bSigned;					\
+	static const bool is_integer = bInteger;				\
+	static const bool is_integral = bIntegral;				\
+	static const unsigned digits = __limits_digits(T);		\
 }
 
 //--------------------------------------------------------------------------------------
@@ -59,3 +61,5 @@ NUMERIC_LIMITS( long double,		LDBL_MIN,	LDBL_MAX,	true,	false,	true);
 NUMERIC_LIMITS( long long,			LLONG_MIN,	LLONG_MAX,	true,	true,	true);
 NUMERIC_LIMITS( unsigned long long,	0,			ULLONG_MAX,	false,	true,	true);
 //--------------------------------------------------------------------------------------
+
+}

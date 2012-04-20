@@ -4,6 +4,10 @@
 
 #pragma once
 
+#include <string.h>
+
+namespace ustl {
+
 //----------------------------------------------------------------------
 // Standard functors
 //----------------------------------------------------------------------
@@ -55,8 +59,9 @@ STD_UNARY_FUNCTOR  (identity,		T,		(a))
 template <class T1, class T2> struct project1st	: public binary_function<T1,T2,T1> { inline const T1& operator()(const T1& a, const T2&) const { return (a); } };
 template <class T1, class T2> struct project2nd	: public binary_function<T1,T2,T2> { inline const T2& operator()(const T1&, const T2& a) const { return (a); } };
 
-#include <string.h>
 template<> class less<char*>	{ public: inline bool operator()(const char*& a, const char*& b) const { return strcmp(a, b) < 0; } };
 //template<> class less<LPCSTR>	{ public: inline bool operator()(const LPCSTR& a, const LPCSTR& b) const { return strcmp(a, b) < 0; } };
 template<> class less<wchar_t*>	{ public: inline bool operator()(const wchar_t*& a, const wchar_t*& b) const { return wcscmp(a, b) < 0; } };
 //template<> class less<LPCWSTR>	{ public: inline bool operator()(const LPCWSTR& a, const LPCWSTR& b) const { return wcscmp(a, b) < 0; } };
+
+}

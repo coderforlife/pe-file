@@ -6,6 +6,8 @@
 
 #include "utypes.h"
 
+namespace ustl {
+
 template <typename Iterator>
 struct iterator_traits {
 	typedef typename Iterator::value_type		value_type;
@@ -62,3 +64,5 @@ public:
 protected:
 	Iterator i;
 };
+
+}

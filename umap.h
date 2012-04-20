@@ -11,6 +11,8 @@
 #include "upair.h"
 #include "ufunction.h"
 
+namespace ustl {
+
 template <typename K, typename T, typename Compare = less<K> >
 class map : protected vector<pair<K,T> > {
 public:
@@ -167,4 +169,6 @@ inline typename map<K,V,Compare>::const_iterator map<K,V,Compare>::upper_bound(c
 			first = mid+1;
 	}
 	return last;
+}
+
 }

@@ -8,6 +8,8 @@
 
 #pragma comment(lib, "Version.lib")		// for VerQueryValueW to read file versions
 
+using namespace PE;
+
 #define SAVE_ERR()			DWORD _err_ = GetLastError()
 #define SET_ERR()			SetLastError(_err_)
 
@@ -68,7 +70,7 @@ static const LPVOID GetResourceDirectInRsrc(const LPBYTE data, const IMAGE_SECTI
 	// Return the size and data
 	return rsrc+dataEntry->OffsetToData-rsrcSect->VirtualAddress;
 }
-const LPVOID PEFile::GetResourceDirect(const LPVOID _data, LPCWSTR type, LPCWSTR name) {
+const LPVOID File::GetResourceDirect(const LPVOID _data, LPCWSTR type, LPCWSTR name) {
 	const LPBYTE data = (const LPBYTE)_data;
 
 	// Load and check headers
@@ -99,6 +101,7 @@ const LPVOID PEFile::GetResourceDirect(const LPVOID _data, LPCWSTR type, LPCWSTR
 ///////////////////////////////////////////////////////////////////////////////
 #include "umap.h"
 #include "uvector.h"
+using namespace ustl;
 typedef BOOL (WINAPI *UNMAP_OR_CLOSE)(void*);
 typedef map<LPCWSTR, vector<LPVOID> > MMFViews;
 static MMFViews mmfHndls, mmfViews;
@@ -133,7 +136,7 @@ static void _UnmapAll(MMFViews &mmfs, LPCWSTR file, UNMAP_OR_CLOSE func) {
 		mmfs.erase(v);
 	}
 }
-void PEFile::UnmapAllViewsOfFile(LPCWSTR file) {
+void File::UnmapAllViewsOfFile(LPCWSTR file) {
 	_UnmapAll(mmfHndls, file, &CloseHandle);
 	_UnmapAll(mmfViews, file, (UNMAP_OR_CLOSE)&UnmapViewOfFile);
 }
@@ -143,13 +146,13 @@ void PEFile::UnmapAllViewsOfFile(LPCWSTR file) {
 ///////////////////////////////////////////////////////////////////////////////
 ///// Loading Functions
 ///////////////////////////////////////////////////////////////////////////////
-PEFile::PEFile(LPVOID data, size_t size, bool readonly)
+File::File(LPVOID data, size_t size, bool readonly)
 	: sections(NULL), res(NULL), readonly(readonly), hFile(NULL), hMap(NULL), size(size), orig_data((LPBYTE)data), data(NULL), version(0), modified(false) {
 	this->original[0] = 0;
 	if (!map() || !this->load(true))
 		this->unload();
 }
-PEFile::PEFile(LPCWSTR file, bool readonly)
+File::File(LPCWSTR file, bool readonly)
 	: sections(NULL), res(NULL), readonly(readonly), hFile(NULL), hMap(NULL), size(0), orig_data(NULL), data(NULL), version(0), modified(false) {
 	this->original[0] = 0;
 	if (!GetFullPathName(file, ARRAYSIZE(this->original), this->original, NULL) ||
@@ -159,7 +162,7 @@ PEFile::PEFile(LPCWSTR file, bool readonly)
 			this->unload();
 	}
 }
-bool PEFile::map() { // only call this from an unmapped state
+bool File::map() { // only call this from an unmapped state
 	if (this->orig_data) {
 		if (this->readonly) {
 			DWORD old_protect = 0;
@@ -174,7 +177,7 @@ bool PEFile::map() { // only call this from an unmapped state
 			(this->data = (LPBYTE)AddMMFView(this->original, MapViewOfFile(this->hMap, (this->readonly ? FILE_MAP_READ : FILE_MAP_ALL_ACCESS), 0, 0, 0))) != NULL;
 	}
 }
-void PEFile::unmap() {
+void File::unmap() {
 	this->flush();
 	if (this->orig_data && this->data) {
 		if (this->readonly) { VirtualFree(this->data, 0, MEM_RELEASE); }
@@ -185,7 +188,7 @@ void PEFile::unmap() {
 		RemoveMMF(this->original, this->hMap); CloseHandle(this->hMap); this->hMap = NULL;
 	}
 }
-bool PEFile::load(bool incRes) {
+bool File::load(bool incRes) {
 	this->dosh = (IMAGE_DOS_HEADER*)this->data;
 	if (this->dosh->e_magic != IMAGE_DOS_SIGNATURE)					{ SetLastError(ERROR_INVALID_DATA); return false; }
 	this->peOffset = this->dosh->e_lfanew;
@@ -221,8 +224,8 @@ bool PEFile::load(bool incRes) {
 
 	return true;
 }
-PEFile::~PEFile() { unload(); if (this->orig_data) free(this->orig_data); }
-void PEFile::unload() {
+File::~File() { unload(); if (this->orig_data) free(this->orig_data); }
+void File::unload() {
 	SAVE_ERR();
 	if (this->res) { delete this->res; this->res = NULL; }
 	unmap();
@@ -230,34 +233,34 @@ void PEFile::unload() {
 	this->sections = NULL;
 	SET_ERR();
 }
-bool PEFile::isLoaded() const { return this->sections != NULL; }
-bool PEFile::isReadOnly() const { return this->readonly; }
-bool PEFile::usesMemoryMappedFile() const { return this->orig_data == NULL; }
+bool File::isLoaded() const { return this->sections != NULL; }
+bool File::isReadOnly() const { return this->readonly; }
+bool File::usesMemoryMappedFile() const { return this->orig_data == NULL; }
 #pragma endregion
 
 #pragma region Header Functions
 ///////////////////////////////////////////////////////////////////////////////
 ///// Header Functions
 ///////////////////////////////////////////////////////////////////////////////
-bool PEFile::is32bit() const { return (this->header->Characteristics & IMAGE_FILE_32BIT_MACHINE) != 0; }
-bool PEFile::is64bit() const { return (this->header->Characteristics & IMAGE_FILE_32BIT_MACHINE) == 0; }
-ULONGLONG PEFile::getImageBase() const { return this->is64bit() ? this->nth64->OptionalHeader.ImageBase : this->nth32->OptionalHeader.ImageBase; }
+bool File::is32bit() const { return (this->header->Characteristics & IMAGE_FILE_32BIT_MACHINE) != 0; }
+bool File::is64bit() const { return (this->header->Characteristics & IMAGE_FILE_32BIT_MACHINE) == 0; }
+ULONGLONG File::getImageBase() const { return this->is64bit() ? this->nth64->OptionalHeader.ImageBase : this->nth32->OptionalHeader.ImageBase; }
 
-IMAGE_FILE_HEADER *PEFile::getFileHeader() { return this->header; }
-IMAGE_NT_HEADERS32 *PEFile::getNtHeaders32() { return this->nth32; }
-IMAGE_NT_HEADERS64 *PEFile::getNtHeaders64() { return this->nth64; }
+IMAGE_FILE_HEADER *File::getFileHeader() { return this->header; }
+IMAGE_NT_HEADERS32 *File::getNtHeaders32() { return this->nth32; }
+IMAGE_NT_HEADERS64 *File::getNtHeaders64() { return this->nth64; }
 
-const IMAGE_FILE_HEADER *PEFile::getFileHeader() const { return this->header; }
-const IMAGE_NT_HEADERS32 *PEFile::getNtHeaders32() const { return this->nth32; }
-const IMAGE_NT_HEADERS64 *PEFile::getNtHeaders64() const { return this->nth64; }
+const IMAGE_FILE_HEADER *File::getFileHeader() const { return this->header; }
+const IMAGE_NT_HEADERS32 *File::getNtHeaders32() const { return this->nth32; }
+const IMAGE_NT_HEADERS64 *File::getNtHeaders64() const { return this->nth64; }
 
-DWORD PEFile::getDataDirectoryCount() const { return this->is64bit() ? this->nth64->OptionalHeader.NumberOfRvaAndSizes : this->nth32->OptionalHeader.NumberOfRvaAndSizes; }
-IMAGE_DATA_DIRECTORY *PEFile::getDataDirectory(int i) { return this->dataDir+i; }
-const IMAGE_DATA_DIRECTORY *PEFile::getDataDirectory(int i) const { return this->dataDir+i; }
+DWORD File::getDataDirectoryCount() const { return this->is64bit() ? this->nth64->OptionalHeader.NumberOfRvaAndSizes : this->nth32->OptionalHeader.NumberOfRvaAndSizes; }
+IMAGE_DATA_DIRECTORY *File::getDataDirectory(int i) { return this->dataDir+i; }
+const IMAGE_DATA_DIRECTORY *File::getDataDirectory(int i) const { return this->dataDir+i; }
 
-int PEFile::getSectionHeaderCount() const { return this->header->NumberOfSections; }
-IMAGE_SECTION_HEADER *PEFile::getSectionHeader(int i) { return this->sections+i; }
-IMAGE_SECTION_HEADER *PEFile::getSectionHeader(const char *str, int *index) {
+int File::getSectionHeaderCount() const { return this->header->NumberOfSections; }
+IMAGE_SECTION_HEADER *File::getSectionHeader(int i) { return this->sections+i; }
+IMAGE_SECTION_HEADER *File::getSectionHeader(const char *str, int *index) {
 	for (WORD i = 0; i < this->header->NumberOfSections; i++) {
 		if (strncmp((CHAR*)this->sections[i].Name, str, IMAGE_SIZEOF_SHORT_NAME) == 0) {
 			if (index) *index = i;
@@ -266,7 +269,7 @@ IMAGE_SECTION_HEADER *PEFile::getSectionHeader(const char *str, int *index) {
 	}
 	return NULL;
 }
-IMAGE_SECTION_HEADER *PEFile::getSectionHeaderByRVA(DWORD rva, int *index) {
+IMAGE_SECTION_HEADER *File::getSectionHeaderByRVA(DWORD rva, int *index) {
 	for (WORD i = 0; i < this->header->NumberOfSections; i++)
 		if (this->sections[i].VirtualAddress <= rva && rva < this->sections[i].VirtualAddress + this->sections[i].Misc.VirtualSize) {
 			if (index) *index = i;
@@ -274,9 +277,9 @@ IMAGE_SECTION_HEADER *PEFile::getSectionHeaderByRVA(DWORD rva, int *index) {
 		}
 	return NULL;
 }
-IMAGE_SECTION_HEADER *PEFile::getSectionHeaderByVA(ULONGLONG va, int *index) { return this->getSectionHeaderByRVA((DWORD)(va - this->getImageBase()), index); }
-const IMAGE_SECTION_HEADER *PEFile::getSectionHeader(int i) const { return this->sections+i; }
-const IMAGE_SECTION_HEADER *PEFile::getSectionHeader(const char *str, int *index) const {
+IMAGE_SECTION_HEADER *File::getSectionHeaderByVA(ULONGLONG va, int *index) { return this->getSectionHeaderByRVA((DWORD)(va - this->getImageBase()), index); }
+const IMAGE_SECTION_HEADER *File::getSectionHeader(int i) const { return this->sections+i; }
+const IMAGE_SECTION_HEADER *File::getSectionHeader(const char *str, int *index) const {
 	for (WORD i = 0; i < this->header->NumberOfSections; i++) {
 		if (strncmp((CHAR*)this->sections[i].Name, str, IMAGE_SIZEOF_SHORT_NAME) == 0) {
 			if (index) *index = i;
@@ -285,7 +288,7 @@ const IMAGE_SECTION_HEADER *PEFile::getSectionHeader(const char *str, int *index
 	}
 	return NULL;
 }
-const IMAGE_SECTION_HEADER *PEFile::getSectionHeaderByRVA(DWORD rva, int *index) const {
+const IMAGE_SECTION_HEADER *File::getSectionHeaderByRVA(DWORD rva, int *index) const {
 	for (WORD i = 0; i < this->header->NumberOfSections; i++)
 		if (this->sections[i].VirtualAddress <= rva && rva < this->sections[i].VirtualAddress + this->sections[i].Misc.VirtualSize) {
 			if (index) *index = i;
@@ -293,14 +296,14 @@ const IMAGE_SECTION_HEADER *PEFile::getSectionHeaderByRVA(DWORD rva, int *index)
 		}
 	return NULL;
 }
-const IMAGE_SECTION_HEADER *PEFile::getSectionHeaderByVA(ULONGLONG va, int *index) const { return this->getSectionHeaderByRVA((DWORD)(va - this->getImageBase()), index); }
+const IMAGE_SECTION_HEADER *File::getSectionHeaderByVA(ULONGLONG va, int *index) const { return this->getSectionHeaderByRVA((DWORD)(va - this->getImageBase()), index); }
 #pragma endregion
 
 #pragma region Special Section Header Functions
 ///////////////////////////////////////////////////////////////////////////////
 ///// Special Section Header Functions
 ///////////////////////////////////////////////////////////////////////////////
-IMAGE_SECTION_HEADER *PEFile::getExpandedSectionHdr(int i, DWORD room) {
+IMAGE_SECTION_HEADER *File::getExpandedSectionHdr(int i, DWORD room) {
 	if (i >= this->header->NumberOfSections)			{ return NULL; }
 
 	IMAGE_SECTION_HEADER *sect = this->sections+i;
@@ -362,11 +365,11 @@ IMAGE_SECTION_HEADER *PEFile::getExpandedSectionHdr(int i, DWORD room) {
 
 	return sect;
 }
-IMAGE_SECTION_HEADER *PEFile::getExpandedSectionHdr(char *str, DWORD room) {
+IMAGE_SECTION_HEADER *File::getExpandedSectionHdr(char *str, DWORD room) {
 	int i = 0;
 	return this->getSectionHeader(str, &i) ? this->getExpandedSectionHdr(i, room) : NULL;
 }
-IMAGE_SECTION_HEADER *PEFile::createSection(int i, const char *name, DWORD room, DWORD chars) {
+IMAGE_SECTION_HEADER *File::createSection(int i, const char *name, DWORD room, DWORD chars) {
 	// Check if section already exists. If it does, expand it and return it
 	int j;
 	IMAGE_SECTION_HEADER *sect = this->getSectionHeader(name, &j);
@@ -457,11 +460,11 @@ IMAGE_SECTION_HEADER *PEFile::createSection(int i, const char *name, DWORD room,
 	return this->sections+i;
 }
 
-IMAGE_SECTION_HEADER *PEFile::createSection(const char *str, const char *name, DWORD room, DWORD chars) {
+IMAGE_SECTION_HEADER *File::createSection(const char *str, const char *name, DWORD room, DWORD chars) {
 	int i = this->header->NumberOfSections;
 	return (str == NULL || this->getSectionHeader(str, &i)) ? this->createSection(i, name, room, chars) : NULL;
 }
-IMAGE_SECTION_HEADER *PEFile::createSection(const char *name, DWORD room, DWORD chars) {
+IMAGE_SECTION_HEADER *File::createSection(const char *name, DWORD room, DWORD chars) {
 	int i = this->header->NumberOfSections;
 	this->getSectionHeader(".reloc", &i); // if it doesn't exist, i will remain unchanged
 	return this->createSection(i, name, room, chars);
@@ -472,8 +475,8 @@ IMAGE_SECTION_HEADER *PEFile::createSection(const char *name, DWORD room, DWORD 
 ///////////////////////////////////////////////////////////////////////////////
 ///// Size Functions 
 ///////////////////////////////////////////////////////////////////////////////
-size_t PEFile::getSize() const { return this->size; }
-bool PEFile::setSize(size_t dwSize, bool grow_only) {
+size_t File::getSize() const { return this->size; }
+bool File::setSize(size_t dwSize, bool grow_only) {
 	if (this->readonly)										{ return false; }
 	bool shrinking = dwSize < this->size;
 	if (dwSize == this->size || (grow_only && shrinking))	{ return true; }
@@ -497,28 +500,28 @@ bool PEFile::setSize(size_t dwSize, bool grow_only) {
 ///// Resource Shortcut Functions
 ///////////////////////////////////////////////////////////////////////////////
 #ifdef EXPOSE_DIRECT_RESOURCES
-Rsrc *PEFile::getResources() { return this->res; }
-const Rsrc *PEFile::getResources() const { return this->res; }
+Rsrc *File::getResources() { return this->res; }
+const Rsrc *File::getResources() const { return this->res; }
 #endif
-bool PEFile::resourceExists(LPCWSTR type, LPCWSTR name, WORD lang) const { return this->res->exists(type, name, lang); }
-bool PEFile::resourceExists(LPCWSTR type, LPCWSTR name, WORD* lang) const { return this->res->exists(type, name, lang); }
-LPVOID PEFile::getResource(LPCWSTR type, LPCWSTR name, WORD lang, size_t* size) const { return this->res->get(type, name, lang, size); }
-LPVOID PEFile::getResource(LPCWSTR type, LPCWSTR name, WORD* lang, size_t* size) const { return this->res->get(type, name, lang, size); }
-bool PEFile::removeResource(LPCWSTR type, LPCWSTR name, WORD lang) { return !this->readonly && this->res->remove(type, name, lang); }
-bool PEFile::addResource(LPCWSTR type, LPCWSTR name, WORD lang, const LPVOID data, size_t size, DWORD overwrite) { return !this->readonly && this->res->add(type, name, lang, data, size, overwrite); }
+bool File::resourceExists(LPCWSTR type, LPCWSTR name, WORD lang) const { return this->res->exists(type, name, lang); }
+bool File::resourceExists(LPCWSTR type, LPCWSTR name, WORD* lang) const { return this->res->exists(type, name, lang); }
+LPVOID File::getResource(LPCWSTR type, LPCWSTR name, WORD lang, size_t* size) const { return this->res->get(type, name, lang, size); }
+LPVOID File::getResource(LPCWSTR type, LPCWSTR name, WORD* lang, size_t* size) const { return this->res->get(type, name, lang, size); }
+bool File::removeResource(LPCWSTR type, LPCWSTR name, WORD lang) { return !this->readonly && this->res->remove(type, name, lang); }
+bool File::addResource(LPCWSTR type, LPCWSTR name, WORD lang, const LPVOID data, size_t size, DWORD overwrite) { return !this->readonly && this->res->add(type, name, lang, data, size, overwrite); }
 #pragma endregion
 
 #pragma region Direct Data Functions
 ///////////////////////////////////////////////////////////////////////////////
 ///// Direct Data Functions
 ///////////////////////////////////////////////////////////////////////////////
-LPBYTE PEFile::get(DWORD dwOffset, DWORD *dwSize) { if (dwSize) *dwSize = (DWORD)this->size - dwOffset; return this->data + dwOffset; }
-const LPBYTE PEFile::get(DWORD dwOffset, DWORD *dwSize) const { if (dwSize) *dwSize = (DWORD)this->size - dwOffset; return this->data + dwOffset; }
-bool PEFile::set(const LPVOID lpBuffer, DWORD dwSize, DWORD dwOffset) { return !this->readonly && (dwOffset + dwSize <= this->size) && memcpy(this->data + dwOffset, lpBuffer, dwSize); }
-bool PEFile::zero(DWORD dwSize, DWORD dwOffset) { return !this->readonly && (dwOffset + dwSize <= this->size) && memset(this->data + dwOffset, 0, dwSize); }
-bool PEFile::move(DWORD dwOffset, DWORD dwSize, int dwDistanceToMove) { return !this->readonly && (dwOffset + dwSize + dwDistanceToMove <= this->size) && memmove(this->data+dwOffset+dwDistanceToMove, this->data+dwOffset, dwSize); }
-bool PEFile::shift(DWORD dwOffset, int dwDistanceToMove) { return move(dwOffset, (DWORD)this->size - dwOffset - dwDistanceToMove, dwDistanceToMove); }
-bool PEFile::flush() { return !this->readonly && (!this->hMap || FlushViewOfFile(this->data, 0)) && (!this->hFile || FlushFileBuffers(this->hFile)); }
+LPBYTE File::get(DWORD dwOffset, DWORD *dwSize) { if (dwSize) *dwSize = (DWORD)this->size - dwOffset; return this->data + dwOffset; }
+const LPBYTE File::get(DWORD dwOffset, DWORD *dwSize) const { if (dwSize) *dwSize = (DWORD)this->size - dwOffset; return this->data + dwOffset; }
+bool File::set(const LPVOID lpBuffer, DWORD dwSize, DWORD dwOffset) { return !this->readonly && (dwOffset + dwSize <= this->size) && memcpy(this->data + dwOffset, lpBuffer, dwSize); }
+bool File::zero(DWORD dwSize, DWORD dwOffset) { return !this->readonly && (dwOffset + dwSize <= this->size) && memset(this->data + dwOffset, 0, dwSize); }
+bool File::move(DWORD dwOffset, DWORD dwSize, int dwDistanceToMove) { return !this->readonly && (dwOffset + dwSize + dwDistanceToMove <= this->size) && memmove(this->data+dwOffset+dwDistanceToMove, this->data+dwOffset, dwSize); }
+bool File::shift(DWORD dwOffset, int dwDistanceToMove) { return move(dwOffset, (DWORD)this->size - dwOffset - dwDistanceToMove, dwDistanceToMove); }
+bool File::flush() { return !this->readonly && (!this->hMap || FlushViewOfFile(this->data, 0)) && (!this->hFile || FlushFileBuffers(this->hFile)); }
 #pragma endregion
 
 #pragma region General Query and Settings Functions
@@ -527,7 +530,7 @@ bool PEFile::flush() { return !this->readonly && (!this->hMap || FlushViewOfFile
 ///////////////////////////////////////////////////////////////////////////////
 #define CHK_SUM_FOLD(c) (((c)&0xffff) + ((c)>>16))
 #define CHK_SUM_OFFSET	(peOffset+sizeof(DWORD)+sizeof(IMAGE_FILE_HEADER)+offsetof(IMAGE_OPTIONAL_HEADER, CheckSum))
-bool PEFile::UpdatePEChkSum(LPBYTE data, size_t dwSize, size_t peOffset, DWORD dwOldCheck) {
+bool File::UpdatePEChkSum(LPBYTE data, size_t dwSize, size_t peOffset, DWORD dwOldCheck) {
 	USHORT *ptr = (USHORT*)data;
 	size_t len = dwSize/sizeof(USHORT);
 	DWORD c = 0;
@@ -549,11 +552,11 @@ bool PEFile::UpdatePEChkSum(LPBYTE data, size_t dwSize, size_t peOffset, DWORD d
 	*(DWORD*)(data+CHK_SUM_OFFSET) = (DWORD)(dwCheck + dwSize);
 	return true;
 }
-bool PEFile::updatePEChkSum() { return !this->readonly && UpdatePEChkSum(this->data, this->size, this->peOffset, this->is64bit() ? this->nth64->OptionalHeader.CheckSum : this->nth32->OptionalHeader.CheckSum) && this->flush(); }
+bool File::updatePEChkSum() { return !this->readonly && UpdatePEChkSum(this->data, this->size, this->peOffset, this->is64bit() ? this->nth64->OptionalHeader.CheckSum : this->nth32->OptionalHeader.CheckSum) && this->flush(); }
 //------------------------------------------------------------------------------
 static const BYTE TinyDosStub[] = {0x0E, 0x1F, 0xBA, 0x0E, 0x00, 0xB4, 0x09, 0xCD, 0x21, 0xB8, 0x01, 0x4C, 0xCD, 0x21, 0x57, 0x69, 0x6E, 0x20, 0x4F, 0x6E, 0x6C, 0x79, 0x0D, 0x0A, 0x24, 0x00, 0x00, 0x00};
-bool PEFile::hasExtraData() const { return this->dosh->e_crlc == 0x0000 && this->dosh->e_cparhdr == 0x0002 && this->dosh->e_lfarlc == 0x0020; }
-LPVOID PEFile::getExtraData(DWORD *size) {
+bool File::hasExtraData() const { return this->dosh->e_crlc == 0x0000 && this->dosh->e_cparhdr == 0x0002 && this->dosh->e_lfarlc == 0x0020; }
+LPVOID File::getExtraData(DWORD *size) {
 	DWORD sz = this->peOffset - sizeof(IMAGE_DOS_HEADER);
 	if (!this->hasExtraData()) {
 		if (this->readonly) { return NULL; }
@@ -569,7 +572,7 @@ LPVOID PEFile::getExtraData(DWORD *size) {
 	return this->data + sizeof(IMAGE_DOS_HEADER);
 }
 //------------------------------------------------------------------------------
-bool PEFile::clearCertificateTable() {
+bool File::clearCertificateTable() {
 	if (this->readonly) { return false; }
 	IMAGE_DATA_DIRECTORY d = this->dataDir[IMAGE_DIRECTORY_ENTRY_SECURITY];
 	if (d.VirtualAddress && d.Size) {
@@ -592,18 +595,18 @@ bool PEFile::clearCertificateTable() {
 	return true;
 }
 //------------------------------------------------------------------------------
-bool PEFile::GetVersionInfo(const LPVOID ver, LPCWSTR query, LPVOID *buffer, PUINT len) { return VerQueryValueW(ver, query, buffer, len) != 0; }
-VS_FIXEDFILEINFO *PEFile::GetVersionInfo(const LPVOID ver) { VS_FIXEDFILEINFO *v = NULL; UINT count; return (ver && VerQueryValueW(ver, L"\\", (LPVOID*)&v, &count)) ? v : NULL; }
-ULONGLONG PEFile::getFileVersion() const { return this->version; }
+bool File::GetVersionInfo(const LPVOID ver, LPCWSTR query, LPVOID *buffer, PUINT len) { return VerQueryValueW(ver, query, buffer, len) != 0; }
+VS_FIXEDFILEINFO *File::GetVersionInfo(const LPVOID ver) { VS_FIXEDFILEINFO *v = NULL; UINT count; return (ver && VerQueryValueW(ver, L"\\", (LPVOID*)&v, &count)) ? v : NULL; }
+ULONGLONG File::getFileVersion() const { return this->version; }
 //------------------------------------------------------------------------------
-bool PEFile::isAlreadyModified() const { return this->modified; }
-bool PEFile::setModifiedFlag() {
+bool File::isAlreadyModified() const { return this->modified; }
+bool File::setModifiedFlag() {
 	if (!this->readonly && !this->modified) {
 		LPCWSTR name = NULL;
 		WORD lang = 0;
 		size_t size = 0;
 		LPVOID ver = GetResourceDirectInRsrc(this->data, this->getSectionHeader(".rsrc"), RT_VERSION, FIRST_ENTRY, &name, &lang, &size);
-		VS_FIXEDFILEINFO *v = PEFile::GetVersionInfo(ver);
+		VS_FIXEDFILEINFO *v = File::GetVersionInfo(ver);
 		if (ver && v) {
 			v->dwFileFlags |= v->dwFileFlagsMask & (VS_FF_PATCHED | VS_FF_SPECIALBUILD);
 			this->modified = this->res->add(RT_VERSION, name, lang, ver, size, OVERWRITE_ONLY);
@@ -623,7 +626,7 @@ typedef union _Reloc {
 #define RELOCS(e)		(Reloc*)((LPBYTE)e+sizeof(IMAGE_BASE_RELOCATION))
 #define NEXT_RELOCS(e)	(IMAGE_BASE_RELOCATION*)((LPBYTE)e+e->SizeOfBlock)
 #define COUNT_RELOCS(e)	(e->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD)
-bool PEFile::removeRelocs(DWORD start, DWORD end, bool reverse) {
+bool File::removeRelocs(DWORD start, DWORD end, bool reverse) {
 	if (end < start)							{ return false; }
 
 	// Read the relocs
@@ -672,7 +675,7 @@ bool PEFile::removeRelocs(DWORD start, DWORD end, bool reverse) {
 ///////////////////////////////////////////////////////////////////////////////
 ///// Saving Functions
 ///////////////////////////////////////////////////////////////////////////////
-size_t PEFile::getSizeOf(DWORD cnt, int rsrcIndx, size_t rsrcRawSize) const {
+size_t File::getSizeOf(DWORD cnt, int rsrcIndx, size_t rsrcRawSize) const {
 	size_t size = 0;
 	for (WORD i = 0; i < this->header->NumberOfSections; i++)
 		if (this->sections[i].Characteristics & cnt)
@@ -683,7 +686,7 @@ inline static void adjustAddr(DWORD &addr, size_t rAddr, size_t rNewSize, size_t
 	if (addr != 0 && addr >= rAddr + rOldSize)
 		addr = (DWORD)((addr + rNewSize) - rOldSize); // subtraction needs to be last b/c these are unsigned
 }
-bool PEFile::save() {
+bool File::save() {
 	if (this->readonly) { return false; }
 
 	// Compile the .rsrc, get its size, and get all the information about it
