@@ -1,67 +1,98 @@
-#define _DECLARE_ALL_PE_FILE_RESOURCES_
-#include "PEFileResources.h"
-#include "PEFile.h"
+// pe-file: library for reading and manipulating pe-files
+// Copyright (C) 2012  Jeffrey Bush  jeff@coderforlife.com
+//
+// This library is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #ifdef __cplusplus_cli
 #pragma unmanaged
 #endif
 
-#pragma comment(lib, "Version.lib")		// for VerQueryValueW to read file versions
+#define _DECLARE_ALL_PE_FILE_RESOURCES_
+#include "PEFileResources.h"
+#include "PEFile.h"
+
+#ifdef USE_WINDOWS_API
+#ifdef ARRAYSIZE
+#undef ARRAYSIZE
+#endif
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#undef ABSOLUTE
+#define set_err(e) SetLastError(e)
+#define get_err()  GetLastError()
+#else
+#include <errno.h>
+#define ERROR_INVALID_DATA EFFORM
+#define set_err(e) errno = e
+#define get_err()  errno
+#endif
 
 using namespace PE;
+using namespace PE::Image;
+using namespace PE::Internal;
+using namespace PE::Version;
 
-#define SAVE_ERR()			DWORD _err_ = GetLastError()
-#define SET_ERR()			SetLastError(_err_)
 
 #pragma region GetResourceDirect and get just the offset of the resource
 ///////////////////////////////////////////////////////////////////////////////
 ///// GetResourceDirect - For performance reasons (and get just the offset of the resource)
 ///////////////////////////////////////////////////////////////////////////////
-#define FIRST_ENTRY ((LPWSTR)-1)
-inline static IMAGE_RESOURCE_DIRECTORY *GetDir(const IMAGE_RESOURCE_DIRECTORY_ENTRY *entry, const LPBYTE rsrc) {
-	return (IMAGE_RESOURCE_DIRECTORY*)(rsrc + entry->OffsetToDirectory);
+#define FIRST_ENTRY ((resid)-1)
+inline static ResourceDirectory *GetDir(const ResourceDirectoryEntry *entry, const_bytes rsrc) {
+	return (ResourceDirectory*)(rsrc + entry->OffsetToDirectory);
 }
-inline static IMAGE_RESOURCE_DIRECTORY_ENTRY *FirstEntry(const IMAGE_RESOURCE_DIRECTORY *dir) {
-	return ((dir->NumberOfIdEntries + dir->NumberOfNamedEntries) < 1) ? NULL : (IMAGE_RESOURCE_DIRECTORY_ENTRY*)(dir+1);
+inline static ResourceDirectoryEntry *FirstEntry(const ResourceDirectory *dir) {
+	return ((dir->NumberOfIdEntries + dir->NumberOfNamedEntries) < 1) ? NULL : (ResourceDirectoryEntry*)(dir+1);
 }
-inline static IMAGE_RESOURCE_DIRECTORY *FirstEntry(const IMAGE_RESOURCE_DIRECTORY *dir, const LPBYTE rsrc, LPCWSTR *out = NULL) {
-	const IMAGE_RESOURCE_DIRECTORY_ENTRY *entry = FirstEntry(dir);
+inline static ResourceDirectory *FirstEntry(const ResourceDirectory *dir, const_bytes rsrc, const_resid *out = NULL) {
+	const ResourceDirectoryEntry *entry = FirstEntry(dir);
 	if (entry && out)
-		*out = entry->NameIsString ? ((LPCWSTR)(rsrc+entry->NameOffset+sizeof(WORD))) : MAKEINTRESOURCE(entry->Id);
+		*out = entry->NameIsString ? ((const_resid)(rsrc+entry->NameOffset+sizeof(uint16_t))) : MakeResID(entry->Id);
 	return entry ? GetDir(entry, rsrc) : NULL;
 }
-inline static IMAGE_RESOURCE_DIRECTORY *FindEntryString(const IMAGE_RESOURCE_DIRECTORY *dir, const LPCWSTR id, const LPBYTE rsrc) {
-	const IMAGE_RESOURCE_DIRECTORY_ENTRY *entries = (IMAGE_RESOURCE_DIRECTORY_ENTRY*)(dir+1);
-	for (WORD i = 0; i < dir->NumberOfNamedEntries; i++)
-		if (wcscmp(id, (LPWSTR)(rsrc+entries[i].NameOffset+sizeof(WORD))) == 0)
+inline static ResourceDirectory *FindEntryString(const ResourceDirectory *dir, const_resid id, const_bytes rsrc) {
+	const ResourceDirectoryEntry *entries = (ResourceDirectoryEntry*)(dir+1);
+	for (uint16_t i = 0; i < dir->NumberOfNamedEntries; i++)
+		if (wcscmp(id, (resid)(rsrc+entries[i].NameOffset+sizeof(uint16_t))) == 0)
 			return GetDir(entries+i, rsrc);
 	return NULL;
 }
-inline static IMAGE_RESOURCE_DIRECTORY *FindEntryInt(const IMAGE_RESOURCE_DIRECTORY *dir, WORD id, const LPBYTE rsrc) {
-	const IMAGE_RESOURCE_DIRECTORY_ENTRY *entries = (IMAGE_RESOURCE_DIRECTORY_ENTRY*)(dir+1)+dir->NumberOfNamedEntries;
-	for (WORD i = 0; i < dir->NumberOfIdEntries; i++)
+inline static ResourceDirectory *FindEntryInt(const ResourceDirectory *dir, uint16_t id, const_bytes rsrc) {
+	const ResourceDirectoryEntry *entries = (ResourceDirectoryEntry*)(dir+1)+dir->NumberOfNamedEntries;
+	for (uint16_t i = 0; i < dir->NumberOfIdEntries; i++)
 		if (entries[i].Id == id)
 			return GetDir(entries+i, rsrc);
 	return NULL;
 }
-inline static IMAGE_RESOURCE_DIRECTORY *FindEntry(const IMAGE_RESOURCE_DIRECTORY *dir, LPCWSTR id, const LPBYTE rsrc, LPCWSTR *out = NULL) {
-	return (id == FIRST_ENTRY) ? FirstEntry(dir, rsrc, out) : (IS_INTRESOURCE(id) ? FindEntryInt(dir, RESID2WORD(id), rsrc) : FindEntryString(dir, id, rsrc));
+inline static ResourceDirectory *FindEntry(const ResourceDirectory *dir, const_resid id, const_bytes rsrc, const_resid *out = NULL) {
+	return (id == FIRST_ENTRY) ? FirstEntry(dir, rsrc, out) : (IsIntResID(id) ? FindEntryInt(dir, ResID2Int(id), rsrc) : FindEntryString(dir, id, rsrc));
 }
-static const LPVOID GetResourceDirectInRsrc(const LPBYTE data, const IMAGE_SECTION_HEADER *rsrcSect, LPCWSTR type, LPCWSTR name, LPCWSTR *out_name = NULL, WORD *lang = NULL, size_t *size = NULL) {
+static pntr GetResourceDirectInRsrc(bytes data, const SectionHeader *rsrcSect, const_resid type, const_resid name, const_resid *out_name = NULL, uint16_t *lang = NULL, size_t *size = NULL) {
 	if (!rsrcSect || rsrcSect->PointerToRawData == 0 || rsrcSect->SizeOfRawData == 0)	{ return NULL; }
 
 	// Get the bytes for the RSRC section
-	const LPBYTE rsrc = data + rsrcSect->PointerToRawData;
+	bytes rsrc = data + rsrcSect->PointerToRawData;
 	
 	// Get the type and name directories
-	const IMAGE_RESOURCE_DIRECTORY *dir = (IMAGE_RESOURCE_DIRECTORY*)rsrc;
+	const ResourceDirectory *dir = (ResourceDirectory*)rsrc;
 	if ((dir = FindEntry(dir, type, rsrc, NULL)) == NULL)				{ return NULL; }
 	if ((dir = FindEntry(dir, name, rsrc, out_name)) == NULL)			{ return NULL; }
 
 	// Assume the first language
-	const IMAGE_RESOURCE_DIRECTORY_ENTRY *entry;
+	const ResourceDirectoryEntry *entry;
 	if ((entry = FirstEntry(dir)) == NULL || entry->DataIsDirectory)	{ return NULL; }
-	const IMAGE_RESOURCE_DATA_ENTRY *dataEntry = (IMAGE_RESOURCE_DATA_ENTRY*)(rsrc+entry->OffsetToData);
+	const ResourceDataEntry *dataEntry = (ResourceDataEntry*)(rsrc+entry->OffsetToData);
 
 	// Get the language and size of the resource
 	if (lang) *lang = entry->Id;
@@ -70,75 +101,29 @@ static const LPVOID GetResourceDirectInRsrc(const LPBYTE data, const IMAGE_SECTI
 	// Return the size and data
 	return rsrc+dataEntry->OffsetToData-rsrcSect->VirtualAddress;
 }
-const LPVOID File::GetResourceDirect(const LPVOID _data, LPCWSTR type, LPCWSTR name) {
-	const LPBYTE data = (const LPBYTE)_data;
+pntr File::GetResourceDirect(pntr _data, const_resid type, const_resid name) {
+	bytes data = (bytes)_data;
 
 	// Load and check headers
-	const IMAGE_DOS_HEADER *dosh = (IMAGE_DOS_HEADER*)data;
-	if (dosh->e_magic != IMAGE_DOS_SIGNATURE)						{ return NULL; }
-	LONG peOffset = dosh->e_lfanew;
-	const IMAGE_NT_HEADERS32 *nth32 = (IMAGE_NT_HEADERS32*)(data+peOffset);
-	const IMAGE_NT_HEADERS64 *nth64 = (IMAGE_NT_HEADERS64*)(data+peOffset);
-	IMAGE_FILE_HEADER header = nth32->FileHeader; // identical for 32 and 64 bits
-	if (nth32->Signature != IMAGE_NT_SIGNATURE)						{ return NULL; }
-	bool is64bit = !(header.Characteristics & IMAGE_FILE_32BIT_MACHINE);
-	if ((is64bit && nth64->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) || (!is64bit && nth32->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC)) { return NULL; }
+	const DOSHeader *dosh = (DOSHeader*)data;
+	if (dosh->e_magic != DOSHeader::SIGNATURE)				{ return NULL; }
+	int32_t peOffset = dosh->e_lfanew;
+	const NTHeaders32 *nth32 = (NTHeaders32*)(data+peOffset);
+	//const NTHeaders64 *nth64 = (NTHeaders64*)(data+peOffset);
+	const FileHeader* header = &nth32->FileHeader; // identical for 32 and 64 bits
+	const OptionalHeader* opt = &nth32->OptionalHeader;
+	if (nth32->Signature != NTHeaders::SIGNATURE)			{ return NULL; }
+	bool is64bit = !(header->Characteristics & FileHeader::MACHINE_32BIT);
+	if ((is64bit && opt->Magic != OptionalHeader64::SIGNATURE) || (!is64bit && opt->Magic != OptionalHeader32::SIGNATURE)) { return NULL; }
 
 	// Get the RSRC section
-	const IMAGE_SECTION_HEADER *sections = (IMAGE_SECTION_HEADER*)(data+peOffset+4+IMAGE_SIZEOF_FILE_HEADER+header.SizeOfOptionalHeader);
-	const IMAGE_SECTION_HEADER *rsrcSect = NULL;
-	for (WORD i = 0; i < header.NumberOfSections; ++i)
-		if (strncmp((CHAR*)sections[i].Name, ".rsrc", IMAGE_SIZEOF_SHORT_NAME) == 0) { rsrcSect = sections+i; break; }
+	const SectionHeader *sections = (SectionHeader*)(data+peOffset+sizeof(uint32_t)+sizeof(FileHeader)+header->SizeOfOptionalHeader);
+	const SectionHeader *rsrcSect = NULL;
+	for (uint16_t i = 0; i < header->NumberOfSections; ++i)
+		if (strncmp((char*)sections[i].Name, ".rsrc", ARRAYSIZE(sections[i].Name)) == 0) { rsrcSect = sections+i; break; }
 
 	// Get the resource within the RSRC section
 	return GetResourceDirectInRsrc(data, rsrcSect, type, name);
-}
-#pragma endregion
-
-#pragma region Memory Map Management Functions
-///////////////////////////////////////////////////////////////////////////////
-///// Memory Map Management Functions
-///////////////////////////////////////////////////////////////////////////////
-#include "umap.h"
-#include "uvector.h"
-using namespace ustl;
-typedef BOOL (WINAPI *UNMAP_OR_CLOSE)(void*);
-typedef map<LPCWSTR, vector<LPVOID> > MMFViews;
-static MMFViews mmfHndls, mmfViews;
-static HANDLE AddMMF    (LPCWSTR file, HANDLE hMap) { if (hMap != NULL) mmfHndls[file].push_back(hMap); return hMap; }
-static LPVOID AddMMFView(LPCWSTR file, LPVOID view) { if (view != NULL) mmfViews[file].push_back(view); return view; }
-static void _RemoveMMF(MMFViews &mmfs, LPCWSTR file, LPVOID x) {
-	MMFViews::iterator v = mmfs.find(file);
-	if (v != mmfs.end()) {
-		size_t size = v->second.size();
-		for (size_t i = 0; i < size; ++i) {
-			if (v->second[i] == x) {
-				if (size == 1) {
-					mmfs.erase(v);
-				} else {
-					if (i != size-1) // make the removed element the last element
-						v->second[i] = v->second[size-1];
-					v->second.pop_back(); // remove the last element
-				}
-				break;
-			}
-		}
-	}
-}
-static void RemoveMMF    (LPCWSTR file, HANDLE hMap) { _RemoveMMF(mmfHndls, file, hMap); }
-static void RemoveMMFView(LPCWSTR file, LPVOID view) { _RemoveMMF(mmfViews, file, view); }
-static void _UnmapAll(MMFViews &mmfs, LPCWSTR file, UNMAP_OR_CLOSE func) {
-	MMFViews::iterator v = mmfs.find(file);
-	if (v != mmfs.end()) {
-		size_t size = v->second.size();
-		for (size_t i = 0; i < size; ++i)
-			func(v->second[i]);
-		mmfs.erase(v);
-	}
-}
-void File::UnmapAllViewsOfFile(LPCWSTR file) {
-	_UnmapAll(mmfHndls, file, &CloseHandle);
-	_UnmapAll(mmfViews, file, (UNMAP_OR_CLOSE)&UnmapViewOfFile);
 }
 #pragma endregion
 
@@ -146,292 +131,229 @@ void File::UnmapAllViewsOfFile(LPCWSTR file) {
 ///////////////////////////////////////////////////////////////////////////////
 ///// Loading Functions
 ///////////////////////////////////////////////////////////////////////////////
-File::File(LPVOID data, size_t size, bool readonly)
-	: sections(NULL), res(NULL), readonly(readonly), hFile(NULL), hMap(NULL), size(size), orig_data((LPBYTE)data), data(NULL), version(0), modified(false) {
-	this->original[0] = 0;
-	if (!map() || !this->load(true))
-		this->unload();
+File::File(pntr data, size_t size, bool readonly) : data(new RawDataSource(data, size, readonly)), sections(NULL), res(NULL), modified(false) {
+	if (!this->load(true)) this->unload();
 }
-File::File(LPCWSTR file, bool readonly)
-	: sections(NULL), res(NULL), readonly(readonly), hFile(NULL), hMap(NULL), size(0), orig_data(NULL), data(NULL), version(0), modified(false) {
-	this->original[0] = 0;
-	if (!GetFullPathName(file, ARRAYSIZE(this->original), this->original, NULL) ||
-		(this->hFile = CreateFile(this->original, (readonly ? GENERIC_READ : (GENERIC_READ | GENERIC_WRITE)), FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL)) == INVALID_HANDLE_VALUE ||
-		(this->size = GetFileSize(this->hFile, 0)) == INVALID_FILE_SIZE ||
-		!this->map() || !this->load(true)) {
-			this->unload();
-	}
-}
-bool File::map() { // only call this from an unmapped state
-	if (this->orig_data) {
-		if (this->readonly) {
-			DWORD old_protect = 0;
-			return (this->data = (LPBYTE)VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)) != NULL &&
-				memcpy(this->data, this->orig_data, size) && VirtualProtect(this->data, size, PAGE_READONLY, &old_protect);
-		} else {
-			this->data = this->orig_data;
-			return true;
-		}
-	} else {
-		return (this->hMap = AddMMF(this->original, CreateFileMapping(this->hFile, NULL, (this->readonly ? PAGE_READONLY : PAGE_READWRITE), 0, 0, NULL))) != NULL &&
-			(this->data = (LPBYTE)AddMMFView(this->original, MapViewOfFile(this->hMap, (this->readonly ? FILE_MAP_READ : FILE_MAP_ALL_ACCESS), 0, 0, 0))) != NULL;
-	}
-}
-void File::unmap() {
-	this->flush();
-	if (this->orig_data && this->data) {
-		if (this->readonly) { VirtualFree(this->data, 0, MEM_RELEASE); }
-		this->data = NULL;
-	}
-	if (this->hMap) {
-		if (this->data) { UnmapViewOfFile(this->data); RemoveMMFView(this->original, this->data); this->data = NULL; }
-		RemoveMMF(this->original, this->hMap); CloseHandle(this->hMap); this->hMap = NULL;
-	}
+File::File(const_str file, bool readonly) : data(new MemoryMappedDataSource(file, readonly)), sections(NULL), res(NULL), modified(false) {
+	if (!this->load(true)) this->unload();
 }
 bool File::load(bool incRes) {
-	this->dosh = (IMAGE_DOS_HEADER*)this->data;
-	if (this->dosh->e_magic != IMAGE_DOS_SIGNATURE)					{ SetLastError(ERROR_INVALID_DATA); return false; }
+	this->dosh = (DOSHeader*)(this->data + 0);
+	if (this->dosh->e_magic != DOSHeader::SIGNATURE)	{ set_err(ERROR_INVALID_DATA); return false; }
 	this->peOffset = this->dosh->e_lfanew;
 
-	this->nth32 = (IMAGE_NT_HEADERS32*)(this->data+this->peOffset);
-	this->nth64 = (IMAGE_NT_HEADERS64*)(this->data+this->peOffset);
-	if (this->nth32->Signature != IMAGE_NT_SIGNATURE)				{ SetLastError(ERROR_INVALID_DATA); return false; }
+	this->nth32 = (NTHeaders32*)(this->data + this->peOffset);
+	this->nth64 = (NTHeaders64*)(this->data + this->peOffset);
+	if (this->nth32->Signature != NTHeaders::SIGNATURE)	{ set_err(ERROR_INVALID_DATA); return false; }
 	this->header = &this->nth32->FileHeader; // identical for 32 and 64 bits
+	this->opt = &this->nth32->OptionalHeader; // beginning is identical for 32 and 64 bits
 	bool is64bit = this->is64bit(), is32bit = this->is32bit();
 
-	if ((is64bit && this->nth64->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) ||
-		(is32bit && this->nth32->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC) ||
-		(is64bit == is32bit))										{ SetLastError(ERROR_INVALID_DATA); return false; }
+	if ((is64bit && this->opt->Magic != OptionalHeader64::SIGNATURE) ||
+		(is32bit && this->opt->Magic != OptionalHeader32::SIGNATURE) ||
+		(is64bit == is32bit))							{ set_err(ERROR_INVALID_DATA); return false; }
 
 	this->dataDir = is64bit ? this->nth64->OptionalHeader.DataDirectory : this->nth32->OptionalHeader.DataDirectory;
-	this->sections = (IMAGE_SECTION_HEADER*)(this->data+this->peOffset+4+IMAGE_SIZEOF_FILE_HEADER+this->header->SizeOfOptionalHeader);
+	this->sections = (SectionHeader*)(this->data+this->peOffset+sizeof(uint32_t)+sizeof(FileHeader)+this->header->SizeOfOptionalHeader);
 
 	// Load resources
 	if (incRes) {
-		IMAGE_SECTION_HEADER *sect = this->getSectionHeader(".rsrc");
+		SectionHeader *sect = this->getSectionHeader(".rsrc");
 
 		// Create resources object
-		if ((this->res = Rsrc::createFromRSRCSection(this->data, this->size, sect)) == NULL)
+		if ((this->res = Rsrc::createFromRSRCSection(this->data+0, this->data.size(), sect)) == NULL)
 			return false;
 
 		// Get the current version and modification information from the resources
-		VS_FIXEDFILEINFO *v = GetVersionInfo(GetResourceDirectInRsrc(this->data, sect, RT_VERSION, FIRST_ENTRY));
+		FileVersionBasicInfo *v = FileVersionBasicInfo::Get(GetResourceDirectInRsrc(this->data+0, sect, ResType::VERSION, FIRST_ENTRY));
 		if (v) {
-			this->version = ((ULONGLONG)v->dwFileVersionMS << 32) | v->dwFileVersionLS;
-			this->modified = (v->dwFileFlagsMask & v->dwFileFlags & (VS_FF_PATCHED | VS_FF_SPECIALBUILD)) > 0;
+			this->version = v->FileVersion;
+			this->modified = (v->FileFlagsMask & v->FileFlags & (FileVersionBasicInfo::PATCHED | FileVersionBasicInfo::SPECIALBUILD)) > 0;
 		}
 	}
 
 	return true;
 }
-File::~File() { unload(); if (this->orig_data) free(this->orig_data); }
+File::~File() { unload(); }
 void File::unload() {
-	SAVE_ERR();
+	uint32_t err = get_err();
 	if (this->res) { delete this->res; this->res = NULL; }
-	unmap();
-	if (this->hFile && this->hFile != INVALID_HANDLE_VALUE) { CloseHandle(this->hFile); this->hFile = NULL; }
+	this->data.close();
 	this->sections = NULL;
-	SET_ERR();
+	set_err(err);
 }
-bool File::isLoaded() const { return this->sections != NULL; }
-bool File::isReadOnly() const { return this->readonly; }
-bool File::usesMemoryMappedFile() const { return this->orig_data == NULL; }
+bool File::isLoaded() const { return this->data.isopen(); }
+bool File::isReadOnly() const { return this->data.isreadonly(); }
 #pragma endregion
 
 #pragma region Header Functions
 ///////////////////////////////////////////////////////////////////////////////
 ///// Header Functions
 ///////////////////////////////////////////////////////////////////////////////
-bool File::is32bit() const { return (this->header->Characteristics & IMAGE_FILE_32BIT_MACHINE) != 0; }
-bool File::is64bit() const { return (this->header->Characteristics & IMAGE_FILE_32BIT_MACHINE) == 0; }
-ULONGLONG File::getImageBase() const { return this->is64bit() ? this->nth64->OptionalHeader.ImageBase : this->nth32->OptionalHeader.ImageBase; }
+bool File::is32bit() const { return (this->header->Characteristics & FileHeader::MACHINE_32BIT) != 0; }
+bool File::is64bit() const { return (this->header->Characteristics & FileHeader::MACHINE_32BIT) == 0; }
+uint64_t File::getImageBase() const { return this->is64bit() ? this->opt->ImageBase64 : this->opt->ImageBase32; }
 
-IMAGE_FILE_HEADER *File::getFileHeader() { return this->header; }
-IMAGE_NT_HEADERS32 *File::getNtHeaders32() { return this->nth32; }
-IMAGE_NT_HEADERS64 *File::getNtHeaders64() { return this->nth64; }
+FileHeader *File::getFileHeader() { return this->header; }
+NTHeaders32 *File::getNtHeaders32() { return this->nth32; }
+NTHeaders64 *File::getNtHeaders64() { return this->nth64; }
 
-const IMAGE_FILE_HEADER *File::getFileHeader() const { return this->header; }
-const IMAGE_NT_HEADERS32 *File::getNtHeaders32() const { return this->nth32; }
-const IMAGE_NT_HEADERS64 *File::getNtHeaders64() const { return this->nth64; }
+const FileHeader *File::getFileHeader() const { return this->header; }
+const NTHeaders32 *File::getNtHeaders32() const { return this->nth32; }
+const NTHeaders64 *File::getNtHeaders64() const { return this->nth64; }
 
-DWORD File::getDataDirectoryCount() const { return this->is64bit() ? this->nth64->OptionalHeader.NumberOfRvaAndSizes : this->nth32->OptionalHeader.NumberOfRvaAndSizes; }
-IMAGE_DATA_DIRECTORY *File::getDataDirectory(int i) { return this->dataDir+i; }
-const IMAGE_DATA_DIRECTORY *File::getDataDirectory(int i) const { return this->dataDir+i; }
+uint32_t File::getDataDirectoryCount() const { return this->is64bit() ? this->nth64->OptionalHeader.NumberOfRvaAndSizes : this->nth32->OptionalHeader.NumberOfRvaAndSizes; }
+DataDirectory *File::getDataDirectory(int i) { return this->dataDir+i; }
+const DataDirectory *File::getDataDirectory(int i) const { return this->dataDir+i; }
 
 int File::getSectionHeaderCount() const { return this->header->NumberOfSections; }
-IMAGE_SECTION_HEADER *File::getSectionHeader(int i) { return this->sections+i; }
-IMAGE_SECTION_HEADER *File::getSectionHeader(const char *str, int *index) {
-	for (WORD i = 0; i < this->header->NumberOfSections; i++) {
-		if (strncmp((CHAR*)this->sections[i].Name, str, IMAGE_SIZEOF_SHORT_NAME) == 0) {
+SectionHeader *File::getSectionHeader(int i) { return this->sections+i; }
+SectionHeader *File::getSectionHeader(const char *str, int *index) {
+	for (uint16_t i = 0; i < this->header->NumberOfSections; i++) {
+		if (strncmp((char*)this->sections[i].Name, str, ARRAYSIZE(this->sections[i].Name)) == 0) {
 			if (index) *index = i;
 			return this->sections+i;
 		}
 	}
 	return NULL;
 }
-IMAGE_SECTION_HEADER *File::getSectionHeaderByRVA(DWORD rva, int *index) {
-	for (WORD i = 0; i < this->header->NumberOfSections; i++)
-		if (this->sections[i].VirtualAddress <= rva && rva < this->sections[i].VirtualAddress + this->sections[i].Misc.VirtualSize) {
+SectionHeader *File::getSectionHeaderByRVA(uint32_t rva, int *index) {
+	for (uint16_t i = 0; i < this->header->NumberOfSections; i++)
+		if (this->sections[i].VirtualAddress <= rva && rva < this->sections[i].VirtualAddress + this->sections[i].VirtualSize) {
 			if (index) *index = i;
 			return this->sections+i;
 		}
 	return NULL;
 }
-IMAGE_SECTION_HEADER *File::getSectionHeaderByVA(ULONGLONG va, int *index) { return this->getSectionHeaderByRVA((DWORD)(va - this->getImageBase()), index); }
-const IMAGE_SECTION_HEADER *File::getSectionHeader(int i) const { return this->sections+i; }
-const IMAGE_SECTION_HEADER *File::getSectionHeader(const char *str, int *index) const {
-	for (WORD i = 0; i < this->header->NumberOfSections; i++) {
-		if (strncmp((CHAR*)this->sections[i].Name, str, IMAGE_SIZEOF_SHORT_NAME) == 0) {
+SectionHeader *File::getSectionHeaderByVA(uint64_t va, int *index) { return this->getSectionHeaderByRVA((uint32_t)(va - this->getImageBase()), index); }
+const SectionHeader *File::getSectionHeader(int i) const { return this->sections+i; }
+const SectionHeader *File::getSectionHeader(const char *str, int *index) const {
+	for (uint16_t i = 0; i < this->header->NumberOfSections; i++) {
+		if (strncmp((char*)this->sections[i].Name, str, ARRAYSIZE(this->sections[i].Name)) == 0) {
 			if (index) *index = i;
 			return this->sections+i;
 		}
 	}
 	return NULL;
 }
-const IMAGE_SECTION_HEADER *File::getSectionHeaderByRVA(DWORD rva, int *index) const {
-	for (WORD i = 0; i < this->header->NumberOfSections; i++)
-		if (this->sections[i].VirtualAddress <= rva && rva < this->sections[i].VirtualAddress + this->sections[i].Misc.VirtualSize) {
+const SectionHeader *File::getSectionHeaderByRVA(uint32_t rva, int *index) const {
+	for (uint16_t i = 0; i < this->header->NumberOfSections; i++)
+		if (this->sections[i].VirtualAddress <= rva && rva < this->sections[i].VirtualAddress + this->sections[i].VirtualSize) {
 			if (index) *index = i;
 			return this->sections+i;
 		}
 	return NULL;
 }
-const IMAGE_SECTION_HEADER *File::getSectionHeaderByVA(ULONGLONG va, int *index) const { return this->getSectionHeaderByRVA((DWORD)(va - this->getImageBase()), index); }
+const SectionHeader *File::getSectionHeaderByVA(uint64_t va, int *index) const { return this->getSectionHeaderByRVA((uint32_t)(va - this->getImageBase()), index); }
 #pragma endregion
 
 #pragma region Special Section Header Functions
 ///////////////////////////////////////////////////////////////////////////////
 ///// Special Section Header Functions
 ///////////////////////////////////////////////////////////////////////////////
-IMAGE_SECTION_HEADER *File::getExpandedSectionHdr(int i, DWORD room) {
+SectionHeader *File::getExpandedSectionHdr(int i, uint32_t room) {
 	if (i >= this->header->NumberOfSections)			{ return NULL; }
 
-	IMAGE_SECTION_HEADER *sect = this->sections+i;
-	DWORD size = sect->SizeOfRawData, vs = sect->Misc.VirtualSize, min_size = vs + room, salign, falign;
+	SectionHeader *sect = this->sections+i;
+	uint32_t size = sect->SizeOfRawData, vs = sect->VirtualSize, min_size = vs + room;
 	
 	// Check if expansion is necessary
 	if (min_size <= size)								{ return sect; }
 
 	// Get the file and section alignment values
-	if (this->is64bit()) {
-		IMAGE_OPTIONAL_HEADER64 *h = &this->nth64->OptionalHeader;
-		salign = h->SectionAlignment;
-		falign = h->FileAlignment;
-	} else {
-		IMAGE_OPTIONAL_HEADER32 *h = &this->nth32->OptionalHeader;
-		salign = h->SectionAlignment;
-		falign = h->FileAlignment;
-	}
+	uint32_t salign = this->opt->SectionAlignment, falign = this->opt->FileAlignment;
 
 	// Check if expansion is possible
 	if (roundUpTo(vs, salign) < min_size)				{ return NULL; }
 
 	// Move by a multiple of "file alignment"
-	DWORD new_size = (DWORD)roundUpTo(min_size, falign), move = new_size - size;
+	uint32_t new_size = (uint32_t)roundUpTo(min_size, falign), move = new_size - size;
 	
 	// Increase file size (invalidates all local pointers to the file data)
-	if (!this->setSize(this->size+move))				{ return NULL; }
+	if (!this->setSize(this->data.size()+move))			{ return NULL; }
 	sect = this->sections+i; // update the section header pointer 
 
 	// Shift data and fill space with zeros
-	DWORD end = sect->PointerToRawData + size;
+	uint32_t end = sect->PointerToRawData + size;
 	if (!this->shift(end, move) || !this->zero(move, end))	{ return NULL; }
 
 	// Update section headers
 	sect->SizeOfRawData += move; // update the size of the expanding section header
-	for (WORD s = (WORD)i + 1; s < this->header->NumberOfSections; ++s) // update the location of all subsequent sections
+	for (uint16_t s = (uint16_t)i + 1; s < this->header->NumberOfSections; ++s) // update the location of all subsequent sections
 		this->sections[s].PointerToRawData += move;
-	IMAGE_DATA_DIRECTORY *dir; // update the certificate entry if it exists
-	if (this->getDataDirectoryCount() > IMAGE_DIRECTORY_ENTRY_SECURITY && (dir = this->dataDir+IMAGE_DIRECTORY_ENTRY_SECURITY) != NULL && dir->VirtualAddress && dir->Size)
+	DataDirectory *dir; // update the certificate entry if it exists
+	if (this->getDataDirectoryCount() > DataDirectory::SECURITY && (dir = this->dataDir+DataDirectory::SECURITY) != NULL && dir->VirtualAddress && dir->Size)
 		dir->VirtualAddress += move;
 
 	// Update NT header with new size information
-	DWORD chars = sect->Characteristics;
-	if (this->is64bit()) {
-		IMAGE_OPTIONAL_HEADER64 *h = &this->nth64->OptionalHeader;
-		h->SizeOfImage += move;
-		if (chars & IMAGE_SCN_CNT_CODE)					h->SizeOfCode += move;
-		if (chars & IMAGE_SCN_CNT_INITIALIZED_DATA)		h->SizeOfInitializedData += move;
-		if (chars & IMAGE_SCN_CNT_UNINITIALIZED_DATA)	h->SizeOfUninitializedData += move;
-	} else {
-		IMAGE_OPTIONAL_HEADER32 *h = &this->nth32->OptionalHeader;
-		h->SizeOfImage += move;
-		if (chars & IMAGE_SCN_CNT_CODE)					h->SizeOfCode += move;
-		if (chars & IMAGE_SCN_CNT_INITIALIZED_DATA)		h->SizeOfInitializedData += move;
-		if (chars & IMAGE_SCN_CNT_UNINITIALIZED_DATA)	h->SizeOfUninitializedData += move;
-	}
+	uint32_t chars = sect->Characteristics;
+	this->opt->SizeOfImage += move;
+	if (chars & SectionHeader::CNT_CODE)				this->opt->SizeOfCode += move;
+	if (chars & SectionHeader::CNT_INITIALIZED_DATA)	this->opt->SizeOfInitializedData += move;
+	if (chars & SectionHeader::CNT_UNINITIALIZED_DATA)	this->opt->SizeOfUninitializedData += move;
 
 	this->flush();
 
 	return sect;
 }
-IMAGE_SECTION_HEADER *File::getExpandedSectionHdr(char *str, DWORD room) {
+SectionHeader *File::getExpandedSectionHdr(char *str, uint32_t room) {
 	int i = 0;
 	return this->getSectionHeader(str, &i) ? this->getExpandedSectionHdr(i, room) : NULL;
 }
-IMAGE_SECTION_HEADER *File::createSection(int i, const char *name, DWORD room, DWORD chars) {
+SectionHeader *File::createSection(int i, const char *name, uint32_t room, SectionHeader::CharacteristicFlags chars) {
 	// Check if section already exists. If it does, expand it and return it
 	int j;
-	IMAGE_SECTION_HEADER *sect = this->getSectionHeader(name, &j);
+	SectionHeader *sect = this->getSectionHeader(name, &j);
 	if (sect)											{ return this->getExpandedSectionHdr(j, room); }
 
 	// Get the file and section alignment values
-	DWORD salign, falign;
-	if (this->is64bit()) {
-		IMAGE_OPTIONAL_HEADER64 *h = &this->nth64->OptionalHeader;
-		salign = h->SectionAlignment;
-		falign = h->FileAlignment;
-	} else {
-		IMAGE_OPTIONAL_HEADER32 *h = &this->nth32->OptionalHeader;
-		salign = h->SectionAlignment;
-		falign = h->FileAlignment;
-	}
+	uint32_t salign = this->opt->SectionAlignment, falign = this->opt->FileAlignment;
 
 	// Get general information about the header
-	WORD nSects = this->header->NumberOfSections;
-	IMAGE_SECTION_HEADER *last_sect = this->sections + nSects - 1;
-	DWORD header_used_size = (DWORD)((LPBYTE)(last_sect+1) - this->data), header_raw_size = (DWORD)roundUpTo(header_used_size, falign), header_space = header_raw_size - header_used_size;
-	if (header_space < sizeof(IMAGE_SECTION_HEADER))	{ return NULL; }	// no room in header to store a new IMAGE_SECTION_HEADER
+	uint16_t nSects = this->header->NumberOfSections;
+	SectionHeader *last_sect = this->sections + nSects - 1;
+	uint32_t header_used_size = (uint32_t)((bytes)(last_sect+1) - this->data), header_raw_size = (uint32_t)roundUpTo(header_used_size, falign), header_space = header_raw_size - header_used_size;
+	if (header_space < sizeof(SectionHeader))	{ return NULL; }	// no room in header to store a new SectionHeader
 
 	// Get information about where this new section will be placed
 	bool at_end = i >= nSects, no_sects = nSects == 0;
 	sect = at_end ? (no_sects ? NULL : last_sect) : this->sections + i;
 	if (at_end) i = nSects;
-	DWORD pos = at_end ? header_used_size : (DWORD)((LPBYTE)sect - this->data);
+	uint32_t pos = at_end ? header_used_size : (uint32_t)((bytes)sect - this->data);
 
 	// Get the size, position, and address of the new section
-	DWORD raw_size = (DWORD)roundUpTo(room, falign), move_va = (DWORD)roundUpTo(raw_size, salign);
-	DWORD va = (DWORD)roundUpTo(at_end ? (no_sects ? header_used_size : sect->VirtualAddress + sect->Misc.VirtualSize) : sect->VirtualAddress, salign);
-	DWORD pntr = (DWORD)roundUpTo(at_end ? (no_sects ? header_used_size : sect->PointerToRawData + sect->SizeOfRawData) : sect->PointerToRawData, falign);
+	uint32_t raw_size = (uint32_t)roundUpTo(room, falign), move_va = (uint32_t)roundUpTo(raw_size, salign);
+	uint32_t va = (uint32_t)roundUpTo(at_end ? (no_sects ? header_used_size : sect->VirtualAddress + sect->VirtualSize) : sect->VirtualAddress, salign);
+	uint32_t pntr = (uint32_t)roundUpTo(at_end ? (no_sects ? header_used_size : sect->PointerToRawData + sect->SizeOfRawData) : sect->PointerToRawData, falign);
 
 	// Create the new section header
-	IMAGE_SECTION_HEADER s = { {0, 0, 0, 0, 0, 0, 0, 0}, {0}, va, raw_size, pntr, 0, 0, 0, 0, chars };
+	SectionHeader s = { {0, 0, 0, 0, 0, 0, 0, 0}, 0, va, raw_size, pntr, 0, 0, 0, 0, chars };
 	size_t name_len = strlen(name);
-	if (name_len >= IMAGE_SIZEOF_SHORT_NAME)
-		memcpy(s.Name, name, IMAGE_SIZEOF_SHORT_NAME);
+	if (name_len >= ARRAYSIZE(s.Name))
+		memcpy(s.Name, name, ARRAYSIZE(s.Name));
 	else {
 		memcpy(s.Name, name, name_len);
-		memset(s.Name+name_len, 0, IMAGE_SIZEOF_SHORT_NAME-name_len);
+		memset(s.Name+name_len, 0, ARRAYSIZE(s.Name)-name_len);
 	}
 
 	// Increase file size (invalidates all local pointers to the file data)
-	if (!this->setSize(this->size + raw_size))							{ return NULL; }
+	if (!this->setSize(this->data.size() + raw_size))							{ return NULL; }
 	// cannot use sect or last_sect unless they are updated!
 
 	// Shift data and fill space with zeros
 	if (!this->shift(pntr, raw_size) || !this->zero(raw_size, pntr))	{ return NULL; }
 
 	// Update the section headers
-	if (!at_end && !this->move(pos, header_used_size-pos, sizeof(IMAGE_SECTION_HEADER)))	{ return NULL; }
-	if (!this->set(&s, sizeof(IMAGE_SECTION_HEADER), pos))				{ return NULL; }
+	if (!at_end && !this->move(pos, header_used_size-pos, sizeof(SectionHeader)))	{ return NULL; }
+	if (!this->set(&s, sizeof(SectionHeader), pos))									{ return NULL; }
 	++this->header->NumberOfSections;
-	for (WORD s = (WORD)i + 1; s <= nSects; ++s) { // update the location and VA of all subsequent sections
+	for (uint16_t s = (uint16_t)i + 1; s <= nSects; ++s) { // update the location and VA of all subsequent sections
 		this->sections[s].VirtualAddress += move_va;
 		this->sections[s].PointerToRawData += raw_size;
 	}
-	DWORD ddCount = this->getDataDirectoryCount();
-	for (DWORD d = 0; d < ddCount; ++d) { // update the VA of all subsequent data directories
-		if (d == IMAGE_DIRECTORY_ENTRY_SECURITY) {
+	uint32_t ddCount = this->getDataDirectoryCount();
+	for (uint32_t d = 0; d < ddCount; ++d) { // update the VA of all subsequent data directories
+		if (d == DataDirectory::SECURITY) {
 			if (this->dataDir[d].VirtualAddress >= pntr)
 				this->dataDir[d].VirtualAddress += raw_size;
 		} else {
@@ -441,30 +363,21 @@ IMAGE_SECTION_HEADER *File::createSection(int i, const char *name, DWORD room, D
 	}
 	
 	// Update NT header with new size information
-	if (this->is64bit()) {
-		IMAGE_OPTIONAL_HEADER64 *h = &this->nth64->OptionalHeader;
-		h->SizeOfImage += raw_size;
-		if (chars & IMAGE_SCN_CNT_CODE)					h->SizeOfCode += raw_size;
-		if (chars & IMAGE_SCN_CNT_INITIALIZED_DATA)		h->SizeOfInitializedData += raw_size;
-		if (chars & IMAGE_SCN_CNT_UNINITIALIZED_DATA)	h->SizeOfUninitializedData += raw_size;
-	} else {
-		IMAGE_OPTIONAL_HEADER32 *h = &this->nth32->OptionalHeader;
-		h->SizeOfImage += raw_size;
-		if (chars & IMAGE_SCN_CNT_CODE)					h->SizeOfCode += raw_size;
-		if (chars & IMAGE_SCN_CNT_INITIALIZED_DATA)		h->SizeOfInitializedData += raw_size;
-		if (chars & IMAGE_SCN_CNT_UNINITIALIZED_DATA)	h->SizeOfUninitializedData += raw_size;
-	}
+	this->opt->SizeOfImage += raw_size;
+	if (chars & SectionHeader::CNT_CODE)				this->opt->SizeOfCode += raw_size;
+	if (chars & SectionHeader::CNT_INITIALIZED_DATA)	this->opt->SizeOfInitializedData += raw_size;
+	if (chars & SectionHeader::CNT_UNINITIALIZED_DATA)	this->opt->SizeOfUninitializedData += raw_size;
 
 	this->flush();
 
 	return this->sections+i;
 }
 
-IMAGE_SECTION_HEADER *File::createSection(const char *str, const char *name, DWORD room, DWORD chars) {
+SectionHeader *File::createSection(const char *str, const char *name, uint32_t room, SectionHeader::CharacteristicFlags chars) {
 	int i = this->header->NumberOfSections;
 	return (str == NULL || this->getSectionHeader(str, &i)) ? this->createSection(i, name, room, chars) : NULL;
 }
-IMAGE_SECTION_HEADER *File::createSection(const char *name, DWORD room, DWORD chars) {
+SectionHeader *File::createSection(const char *name, uint32_t room, SectionHeader::CharacteristicFlags chars) {
 	int i = this->header->NumberOfSections;
 	this->getSectionHeader(".reloc", &i); // if it doesn't exist, i will remain unchanged
 	return this->createSection(i, name, room, chars);
@@ -475,21 +388,11 @@ IMAGE_SECTION_HEADER *File::createSection(const char *name, DWORD room, DWORD ch
 ///////////////////////////////////////////////////////////////////////////////
 ///// Size Functions 
 ///////////////////////////////////////////////////////////////////////////////
-size_t File::getSize() const { return this->size; }
+size_t File::getSize() const { return this->data.size(); }
 bool File::setSize(size_t dwSize, bool grow_only) {
-	if (this->readonly)										{ return false; }
-	bool shrinking = dwSize < this->size;
-	if (dwSize == this->size || (grow_only && shrinking))	{ return true; }
-	this->unmap();
-	bool retval = (this->orig_data ?
-		((this->orig_data = (LPBYTE)realloc(this->orig_data, dwSize)) != NULL) :
-		SetFilePointer(this->hFile, (DWORD)dwSize, NULL, FILE_BEGIN) != INVALID_SET_FILE_POINTER && SetEndOfFile(this->hFile)) && this->map();
-	if (retval) {
-		this->size = dwSize;
-		if (!shrinking)
-			memset(this->data+this->size, 0, dwSize-this->size); // set new memory to 0
-		retval = this->load(false);
-	}
+	if (this->data.isreadonly()) { return false; }
+	if (dwSize == this->data.size() || (grow_only && dwSize < this->data.size()))	{ return true; }
+	bool retval = this->data.resize(dwSize) && this->load(false);
 	if (!retval) this->unload();
 	return retval;
 }
@@ -503,25 +406,25 @@ bool File::setSize(size_t dwSize, bool grow_only) {
 Rsrc *File::getResources() { return this->res; }
 const Rsrc *File::getResources() const { return this->res; }
 #endif
-bool File::resourceExists(LPCWSTR type, LPCWSTR name, WORD lang) const { return this->res->exists(type, name, lang); }
-bool File::resourceExists(LPCWSTR type, LPCWSTR name, WORD* lang) const { return this->res->exists(type, name, lang); }
-LPVOID File::getResource(LPCWSTR type, LPCWSTR name, WORD lang, size_t* size) const { return this->res->get(type, name, lang, size); }
-LPVOID File::getResource(LPCWSTR type, LPCWSTR name, WORD* lang, size_t* size) const { return this->res->get(type, name, lang, size); }
-bool File::removeResource(LPCWSTR type, LPCWSTR name, WORD lang) { return !this->readonly && this->res->remove(type, name, lang); }
-bool File::addResource(LPCWSTR type, LPCWSTR name, WORD lang, const LPVOID data, size_t size, DWORD overwrite) { return !this->readonly && this->res->add(type, name, lang, data, size, overwrite); }
+bool File::resourceExists(const_resid type, const_resid name, uint16_t lang) const { return this->res->exists(type, name, lang); }
+bool File::resourceExists(const_resid type, const_resid name, uint16_t* lang) const { return this->res->exists(type, name, lang); }
+pntr File::getResource(const_resid type, const_resid name, uint16_t lang, size_t* size) const { return this->res->get(type, name, lang, size); }
+pntr File::getResource(const_resid type, const_resid name, uint16_t* lang, size_t* size) const { return this->res->get(type, name, lang, size); }
+bool File::removeResource(const_resid type, const_resid name, uint16_t lang) { return !this->data.isreadonly() && this->res->remove(type, name, lang); }
+bool File::addResource(const_resid type, const_resid name, uint16_t lang, const_pntr data, size_t size, Overwrite overwrite) { return !this->data.isreadonly() && this->res->add(type, name, lang, data, size, overwrite); }
 #pragma endregion
 
 #pragma region Direct Data Functions
 ///////////////////////////////////////////////////////////////////////////////
 ///// Direct Data Functions
 ///////////////////////////////////////////////////////////////////////////////
-LPBYTE File::get(DWORD dwOffset, DWORD *dwSize) { if (dwSize) *dwSize = (DWORD)this->size - dwOffset; return this->data + dwOffset; }
-const LPBYTE File::get(DWORD dwOffset, DWORD *dwSize) const { if (dwSize) *dwSize = (DWORD)this->size - dwOffset; return this->data + dwOffset; }
-bool File::set(const LPVOID lpBuffer, DWORD dwSize, DWORD dwOffset) { return !this->readonly && (dwOffset + dwSize <= this->size) && memcpy(this->data + dwOffset, lpBuffer, dwSize); }
-bool File::zero(DWORD dwSize, DWORD dwOffset) { return !this->readonly && (dwOffset + dwSize <= this->size) && memset(this->data + dwOffset, 0, dwSize); }
-bool File::move(DWORD dwOffset, DWORD dwSize, int dwDistanceToMove) { return !this->readonly && (dwOffset + dwSize + dwDistanceToMove <= this->size) && memmove(this->data+dwOffset+dwDistanceToMove, this->data+dwOffset, dwSize); }
-bool File::shift(DWORD dwOffset, int dwDistanceToMove) { return move(dwOffset, (DWORD)this->size - dwOffset - dwDistanceToMove, dwDistanceToMove); }
-bool File::flush() { return !this->readonly && (!this->hMap || FlushViewOfFile(this->data, 0)) && (!this->hFile || FlushFileBuffers(this->hFile)); }
+bytes File::get(uint32_t dwOffset, uint32_t *dwSize) { if (dwSize) *dwSize = (uint32_t)this->data.size() - dwOffset; return this->data + dwOffset; }
+const_bytes File::get(uint32_t dwOffset, uint32_t *dwSize) const { if (dwSize) *dwSize = (uint32_t)this->data.size() - dwOffset; return this->data + dwOffset; }
+bool File::set(const_pntr lpBuffer, uint32_t dwSize, uint32_t dwOffset) { return !this->data.isreadonly() && (dwOffset + dwSize <= this->data.size()) && memcpy(this->data + dwOffset, lpBuffer, dwSize); }
+bool File::zero(uint32_t dwSize, uint32_t dwOffset) { return !this->data.isreadonly() && (dwOffset + dwSize <= this->data.size()) && memset(this->data + dwOffset, 0, dwSize); }
+bool File::move(uint32_t dwOffset, uint32_t dwSize, int32_t dwDistanceToMove) { return !this->data.isreadonly() && (dwOffset + dwSize + dwDistanceToMove <= this->data.size()) && memmove(this->data+dwOffset+dwDistanceToMove, this->data+dwOffset, dwSize); }
+bool File::shift(uint32_t dwOffset, int32_t dwDistanceToMove) { return move(dwOffset, (uint32_t)this->data.size() - dwOffset - dwDistanceToMove, dwDistanceToMove); }
+bool File::flush() { return this->data.flush(); }
 #pragma endregion
 
 #pragma region General Query and Settings Functions
@@ -529,11 +432,11 @@ bool File::flush() { return !this->readonly && (!this->hMap || FlushViewOfFile(t
 ///// General Query and Settings Functions
 ///////////////////////////////////////////////////////////////////////////////
 #define CHK_SUM_FOLD(c) (((c)&0xffff) + ((c)>>16))
-#define CHK_SUM_OFFSET	(peOffset+sizeof(DWORD)+sizeof(IMAGE_FILE_HEADER)+offsetof(IMAGE_OPTIONAL_HEADER, CheckSum))
-bool File::UpdatePEChkSum(LPBYTE data, size_t dwSize, size_t peOffset, DWORD dwOldCheck) {
-	USHORT *ptr = (USHORT*)data;
-	size_t len = dwSize/sizeof(USHORT);
-	DWORD c = 0;
+#define CHK_SUM_OFFSET	(peOffset+sizeof(uint32_t)+sizeof(FileHeader)+offsetof(OptionalHeader, CheckSum))
+bool File::UpdatePEChkSum(bytes data, size_t dwSize, size_t peOffset, uint32_t dwOldCheck) {
+	uint16_t *ptr = (uint16_t*)data;
+	size_t len = dwSize/sizeof(uint16_t);
+	uint32_t c = 0;
 	while (len) {
 		size_t l = (len < 0x4000) ? len : 0x4000;
 		len -= l;
@@ -541,7 +444,7 @@ bool File::UpdatePEChkSum(LPBYTE data, size_t dwSize, size_t peOffset, DWORD dwO
 			c += *ptr++;
 		c = CHK_SUM_FOLD(c);
 	}
-	DWORD dwCheck = (DWORD)(WORD)CHK_SUM_FOLD(c);
+	uint32_t dwCheck = (uint32_t)(uint16_t)CHK_SUM_FOLD(c);
 	if (dwSize & 1) {
 		dwCheck += data[dwSize-1];
 		dwCheck = CHK_SUM_FOLD(dwCheck);
@@ -549,45 +452,45 @@ bool File::UpdatePEChkSum(LPBYTE data, size_t dwSize, size_t peOffset, DWORD dwO
 	dwCheck = ((dwCheck-1<dwOldCheck)?(dwCheck-1):dwCheck) - dwOldCheck;
 	dwCheck = CHK_SUM_FOLD(dwCheck);
 	dwCheck = CHK_SUM_FOLD(dwCheck);
-	*(DWORD*)(data+CHK_SUM_OFFSET) = (DWORD)(dwCheck + dwSize);
+	*(uint32_t*)(data+CHK_SUM_OFFSET) = (uint32_t)(dwCheck + dwSize);
 	return true;
 }
-bool File::updatePEChkSum() { return !this->readonly && UpdatePEChkSum(this->data, this->size, this->peOffset, this->is64bit() ? this->nth64->OptionalHeader.CheckSum : this->nth32->OptionalHeader.CheckSum) && this->flush(); }
+bool File::updatePEChkSum() { return !this->data.isreadonly() && UpdatePEChkSum(this->data+0, this->data.size(), this->peOffset, this->is64bit() ? this->nth64->OptionalHeader.CheckSum : this->nth32->OptionalHeader.CheckSum) && this->flush(); }
 //------------------------------------------------------------------------------
-static const BYTE TinyDosStub[] = {0x0E, 0x1F, 0xBA, 0x0E, 0x00, 0xB4, 0x09, 0xCD, 0x21, 0xB8, 0x01, 0x4C, 0xCD, 0x21, 0x57, 0x69, 0x6E, 0x20, 0x4F, 0x6E, 0x6C, 0x79, 0x0D, 0x0A, 0x24, 0x00, 0x00, 0x00};
+static const byte TinyDosStub[] = {0x0E, 0x1F, 0xBA, 0x0E, 0x00, 0xB4, 0x09, 0xCD, 0x21, 0xB8, 0x01, 0x4C, 0xCD, 0x21, 0x57, 0x69, 0x6E, 0x20, 0x4F, 0x6E, 0x6C, 0x79, 0x0D, 0x0A, 0x24, 0x00, 0x00, 0x00};
 bool File::hasExtraData() const { return this->dosh->e_crlc == 0x0000 && this->dosh->e_cparhdr == 0x0002 && this->dosh->e_lfarlc == 0x0020; }
-LPVOID File::getExtraData(DWORD *size) {
-	DWORD sz = this->peOffset - sizeof(IMAGE_DOS_HEADER);
+pntr File::getExtraData(uint32_t *size) {
+	uint32_t sz = this->peOffset - sizeof(DOSHeader);
 	if (!this->hasExtraData()) {
-		if (this->readonly) { return NULL; }
+		if (this->data.isreadonly()) { return NULL; }
 		// Create the new header and fill the old stub in with 0s
 		this->dosh->e_crlc		= 0x0000;	// number of relocations
 		this->dosh->e_cparhdr	= 0x0002;	// size of header in 16 byte paragraphs
 		this->dosh->e_lfarlc	= 0x0020;	// location of relocation table (end of tiny header)
-		memcpy(((BYTE*)this->dosh)+0x20, TinyDosStub, sizeof(TinyDosStub));
-		memset(this->data + sizeof(IMAGE_DOS_HEADER), 0, sz);
+		memcpy(((bytes)this->dosh)+0x20, TinyDosStub, sizeof(TinyDosStub));
+		memset(this->data + sizeof(DOSHeader), 0, sz);
 		this->flush();
 	}
 	*size = sz;
-	return this->data + sizeof(IMAGE_DOS_HEADER);
+	return this->data + sizeof(DOSHeader);
 }
 //------------------------------------------------------------------------------
 bool File::clearCertificateTable() {
-	if (this->readonly) { return false; }
-	IMAGE_DATA_DIRECTORY d = this->dataDir[IMAGE_DIRECTORY_ENTRY_SECURITY];
+	if (this->data.isreadonly()) { return false; }
+	DataDirectory d = this->dataDir[DataDirectory::SECURITY];
 	if (d.VirtualAddress && d.Size) {
 		// Zero out the certificate
 		memset(this->data + d.VirtualAddress, 0, d.Size);
 		
 		// Find out if the certificate was at the end
-		DWORD i;
-		for (i = d.VirtualAddress + d.Size; i < this->size && !this->data[i-1]; ++i);
-		if (i >= this->size && !this->setSize(d.VirtualAddress, false))
+		uint32_t i;
+		for (i = d.VirtualAddress + d.Size; i < this->data.size() && !this->data[i-1]; ++i);
+		if (i >= this->data.size() && !this->setSize(d.VirtualAddress, false))
 			return false;
 
 		// Update the header
-		this->dataDir[IMAGE_DIRECTORY_ENTRY_SECURITY].VirtualAddress = 0;
-		this->dataDir[IMAGE_DIRECTORY_ENTRY_SECURITY].Size = 0;
+		this->dataDir[DataDirectory::SECURITY].VirtualAddress = 0;
+		this->dataDir[DataDirectory::SECURITY].Size = 0;
 		
 		// Flush the changes
 		this->flush();
@@ -595,21 +498,19 @@ bool File::clearCertificateTable() {
 	return true;
 }
 //------------------------------------------------------------------------------
-bool File::GetVersionInfo(const LPVOID ver, LPCWSTR query, LPVOID *buffer, PUINT len) { return VerQueryValueW(ver, query, buffer, len) != 0; }
-VS_FIXEDFILEINFO *File::GetVersionInfo(const LPVOID ver) { VS_FIXEDFILEINFO *v = NULL; UINT count; return (ver && VerQueryValueW(ver, L"\\", (LPVOID*)&v, &count)) ? v : NULL; }
-ULONGLONG File::getFileVersion() const { return this->version; }
+PE::Version::Version File::getFileVersion() const { return this->version; }
 //------------------------------------------------------------------------------
 bool File::isAlreadyModified() const { return this->modified; }
 bool File::setModifiedFlag() {
-	if (!this->readonly && !this->modified) {
-		LPCWSTR name = NULL;
-		WORD lang = 0;
+	if (!this->data.isreadonly() && !this->modified) {
+		const_resid name = NULL;
+		uint16_t lang = 0;
 		size_t size = 0;
-		LPVOID ver = GetResourceDirectInRsrc(this->data, this->getSectionHeader(".rsrc"), RT_VERSION, FIRST_ENTRY, &name, &lang, &size);
-		VS_FIXEDFILEINFO *v = File::GetVersionInfo(ver);
-		if (ver && v) {
-			v->dwFileFlags |= v->dwFileFlagsMask & (VS_FF_PATCHED | VS_FF_SPECIALBUILD);
-			this->modified = this->res->add(RT_VERSION, name, lang, ver, size, OVERWRITE_ONLY);
+		pntr ver = GetResourceDirectInRsrc(this->data+0, this->getSectionHeader(".rsrc"), ResType::VERSION, FIRST_ENTRY, &name, &lang, &size);
+		FileVersionBasicInfo *v = FileVersionBasicInfo::Get(ver);
+		if (v) {
+			v->FileFlags = (FileVersionBasicInfo::Flags)(v->FileFlags | (v->FileFlagsMask & (FileVersionBasicInfo::PATCHED | FileVersionBasicInfo::SPECIALBUILD)));
+			this->modified = this->res->add(ResType::VERSION, name, lang, ver, size, ONLY);
 			this->flush();
 		}
 	}
@@ -617,50 +518,50 @@ bool File::setModifiedFlag() {
 }
 //-----------------------------------------------------------------------------
 typedef union _Reloc {
-	WORD Reloc;
+	uint16_t Reloc;
 	struct {
-		WORD Offset : 12;
-		WORD Type : 4;
+		uint16_t Offset : 12;
+		uint16_t Type : 4;
 	};
 } Reloc;
-#define RELOCS(e)		(Reloc*)((LPBYTE)e+sizeof(IMAGE_BASE_RELOCATION))
-#define NEXT_RELOCS(e)	(IMAGE_BASE_RELOCATION*)((LPBYTE)e+e->SizeOfBlock)
-#define COUNT_RELOCS(e)	(e->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD)
-bool File::removeRelocs(DWORD start, DWORD end, bool reverse) {
+#define RELOCS(e)		(Reloc*)((bytes)e+sizeof(BaseRelocation))
+#define NEXT_RELOCS(e)	(BaseRelocation*)((bytes)e+e->SizeOfBlock)
+#define COUNT_RELOCS(e)	(e->SizeOfBlock - sizeof(BaseRelocation)) / sizeof(uint16_t)
+bool File::removeRelocs(uint32_t start, uint32_t end, bool reverse) {
 	if (end < start)							{ return false; }
 
 	// Read the relocs
-	//IMAGE_DATA_DIRECTORY dir = f->getDataDirectory(IMAGE_DIRECTORY_ENTRY_BASERELOC);
-	//DWORD size = dir.Size, pntr = dir.VirtualAddress;
-	IMAGE_SECTION_HEADER *sect = this->getSectionHeader(".reloc");
+	//DataDirectory dir = f->getDataDirectory(DataDirectory::BASERELOC);
+	//uint32 size = dir.Size, pntr = dir.VirtualAddress;
+	SectionHeader *sect = this->getSectionHeader(".reloc");
 	if (sect == NULL)							{ return true; } // no relocations exist, so nothing to remove!
 
-	DWORD size = sect->SizeOfRawData, pntr = sect->PointerToRawData;
-	LPBYTE data = this->get(pntr);
+	uint32_t size = sect->SizeOfRawData, pntr = sect->PointerToRawData;
+	bytes data = this->get(pntr);
 
-	//IMAGE_REL_BASED_ABSOLUTE	= IMAGE_REL_I386_ABSOLUTE or IMAGE_REL_AMD64_ABSOLUTE
-	//IMAGE_REL_BASED_HIGHLOW	=> ??? or IMAGE_REL_AMD64_ADDR32NB (32-bit address w/o image base (RVA))
-	//IMAGE_REL_BASED_DIR64		=> IMAGE_REL_AMD64_SSPAN32 (32 bit signed span-dependent value applied at link time)
-	WORD new_type = reverse ? (this->is64bit() ? IMAGE_REL_BASED_DIR64 : IMAGE_REL_BASED_HIGHLOW) : IMAGE_REL_BASED_ABSOLUTE;
+	//ABSOLUTE	= IMAGE_REL_I386_ABSOLUTE or IMAGE_REL_AMD64_ABSOLUTE
+	//HIGHLOW	=> ??? or IMAGE_REL_AMD64_ADDR32NB (32-bit address w/o image base (RVA))
+	//DIR64		=> IMAGE_REL_AMD64_SSPAN32 (32 bit signed span-dependent value applied at link time)
+	uint16_t new_type = reverse ? (this->is64bit() ? BaseRelocation::DIR64 : BaseRelocation::HIGHLOW) : BaseRelocation::ABSOLUTE;
 
 	// Remove everything that is between start and end
 	// We do a thorough search for possible relocations and do not assume that they are in order
 	void *entry_end = data + size;
-	for (IMAGE_BASE_RELOCATION *entry = (IMAGE_BASE_RELOCATION*)data; entry < entry_end && entry->SizeOfBlock > 0; entry = NEXT_RELOCS(entry)) {
+	for (BaseRelocation *entry = (BaseRelocation*)data; entry < entry_end && entry->SizeOfBlock > 0; entry = NEXT_RELOCS(entry)) {
 
 		// Check that the ranges overlap
 		if (entry->VirtualAddress+0xFFF < start || entry->VirtualAddress > end) continue;
 
 		// Go through each reloc in this entry
-		DWORD count = COUNT_RELOCS(entry);
+		uint32_t count = COUNT_RELOCS(entry);
 		Reloc *relocs = RELOCS(entry);
-		for (DWORD i = 0; i < count; ++i) {
+		for (uint32_t i = 0; i < count; ++i) {
 			// Already 'removed'
-			if ((!reverse && relocs[i].Type == IMAGE_REL_BASED_ABSOLUTE) ||
-				(reverse && (relocs[i].Type != IMAGE_REL_BASED_ABSOLUTE || relocs[i].Offset == 0))) continue;
+			if ((!reverse && relocs[i].Type == BaseRelocation::ABSOLUTE) ||
+				(reverse && (relocs[i].Type != BaseRelocation::ABSOLUTE || relocs[i].Offset == 0))) continue;
 
 			// Check the virtual address and possibly clear it
-			DWORD va = entry->VirtualAddress + relocs[i].Offset;
+			uint32_t va = entry->VirtualAddress + relocs[i].Offset;
 			if (va >= start && va <= end) {
 				//relocs[i].Reloc = 0;
 				relocs[i].Type = new_type;
@@ -675,63 +576,55 @@ bool File::removeRelocs(DWORD start, DWORD end, bool reverse) {
 ///////////////////////////////////////////////////////////////////////////////
 ///// Saving Functions
 ///////////////////////////////////////////////////////////////////////////////
-size_t File::getSizeOf(DWORD cnt, int rsrcIndx, size_t rsrcRawSize) const {
+size_t File::getSizeOf(uint32_t cnt, int rsrcIndx, size_t rsrcRawSize) const {
 	size_t size = 0;
-	for (WORD i = 0; i < this->header->NumberOfSections; i++)
+	for (uint16_t i = 0; i < this->header->NumberOfSections; i++)
 		if (this->sections[i].Characteristics & cnt)
-			size += (i == (WORD)rsrcIndx) ? rsrcRawSize : this->sections[i].SizeOfRawData;
+			size += (i == (uint16_t)rsrcIndx) ? rsrcRawSize : this->sections[i].SizeOfRawData;
 	return size;
 }
-inline static void adjustAddr(DWORD &addr, size_t rAddr, size_t rNewSize, size_t rOldSize) {
+inline static void adjustAddr(uint32_t &addr, size_t rAddr, size_t rNewSize, size_t rOldSize) {
 	if (addr != 0 && addr >= rAddr + rOldSize)
-		addr = (DWORD)((addr + rNewSize) - rOldSize); // subtraction needs to be last b/c these are unsigned
+		addr = (uint32_t)((addr + rNewSize) - rOldSize); // subtraction needs to be last b/c these are unsigned
 }
 bool File::save() {
-	if (this->readonly) { return false; }
+	if (this->data.isreadonly()) { return false; }
 
 	// Compile the .rsrc, get its size, and get all the information about it
 	bool is64bit = this->is64bit();
-	DWORD fAlign = is64bit ? this->getNtHeaders64()->OptionalHeader.FileAlignment    : this->getNtHeaders32()->OptionalHeader.FileAlignment;
-	DWORD sAlign = is64bit ? this->getNtHeaders64()->OptionalHeader.SectionAlignment : this->getNtHeaders32()->OptionalHeader.SectionAlignment;
+	uint32_t fAlign = is64bit ? this->getNtHeaders64()->OptionalHeader.FileAlignment    : this->getNtHeaders32()->OptionalHeader.FileAlignment;
+	uint32_t sAlign = is64bit ? this->getNtHeaders64()->OptionalHeader.SectionAlignment : this->getNtHeaders32()->OptionalHeader.SectionAlignment;
 	int rIndx = 0;
-	IMAGE_SECTION_HEADER *rSect = this->getSectionHeader(".rsrc", &rIndx);
+	SectionHeader *rSect = this->getSectionHeader(".rsrc", &rIndx);
 	if (!rSect) {
-		this->createSection(".rsrc", 0, CHARS_INIT_DATA_SECTION_R);
+		this->createSection(".rsrc", 0, INIT_DATA_SECTION_R);
 		rSect = this->getSectionHeader(".rsrc", &rIndx);
 	}
 	size_t rSize = 0;
-	LPVOID rsrc = this->res->compile(&rSize, rSect->VirtualAddress);
+	pntr rsrc = this->res->compile(&rSize, rSect->VirtualAddress);
 	size_t rRawSize = roundUpTo(rSize, fAlign);
 	size_t rVirSize = roundUpTo(rSize, sAlign);
 	//size_t rSizeOld = rSect->Misc.VirtualSize;
 	size_t rRawSizeOld = rSect->SizeOfRawData;
-	size_t rVirSizeOld = roundUpTo(rSect->Misc.VirtualSize, sAlign);
-	DWORD pntr = rSect->PointerToRawData;
-	DWORD imageSize = 0; //, imageSizeOld = 0;
-	DWORD fileSize = 0, fileSizeOld = (DWORD)this->size;
+	size_t rVirSizeOld = roundUpTo(rSect->VirtualSize, sAlign);
+	uint32_t pntr = rSect->PointerToRawData;
+	uint32_t imageSize = 0; //, imageSizeOld = 0;
+	uint32_t fileSize = 0, fileSizeOld = (uint32_t)this->data.size();
 
 	// Update PointerToSymbolTable
 	adjustAddr(this->header->PointerToSymbolTable, rSect->VirtualAddress, rVirSize, rVirSizeOld);
 
 	// Update Optional Header
-	if (is64bit) {
-		this->nth64->OptionalHeader.SizeOfInitializedData = (DWORD)this->getSizeOf(IMAGE_SCN_CNT_INITIALIZED_DATA, rIndx, rRawSize);
-		adjustAddr(this->nth64->OptionalHeader.AddressOfEntryPoint, rSect->VirtualAddress, rVirSize, rVirSizeOld);
-		adjustAddr(this->nth64->OptionalHeader.BaseOfCode, rSect->VirtualAddress, rVirSize, rVirSizeOld);
-		//imageSizeOld = this->nth64->OptionalHeader.SizeOfImage;
-	} else {
-		this->nth32->OptionalHeader.SizeOfInitializedData = (DWORD)this->getSizeOf(IMAGE_SCN_CNT_INITIALIZED_DATA, rIndx, rRawSize);
-		adjustAddr(this->nth32->OptionalHeader.AddressOfEntryPoint, rSect->VirtualAddress, rVirSize, rVirSizeOld);
-		adjustAddr(this->nth32->OptionalHeader.BaseOfCode, rSect->VirtualAddress, rVirSize, rVirSizeOld);
-		adjustAddr(this->nth32->OptionalHeader.BaseOfData, rSect->VirtualAddress, rVirSize, rVirSizeOld);
-		//imageSizeOld = this->nth32->OptionalHeader.SizeOfImage;
-	}
+	this->opt->SizeOfInitializedData = (uint32_t)this->getSizeOf(SectionHeader::CNT_INITIALIZED_DATA, rIndx, rRawSize);
+	adjustAddr(this->opt->AddressOfEntryPoint, rSect->VirtualAddress, rVirSize, rVirSizeOld);
+	adjustAddr(this->opt->BaseOfCode, rSect->VirtualAddress, rVirSize, rVirSizeOld);
+	//imageSizeOld = this->opt->SizeOfImage;
 
 	// Update the Data Directories
-	this->dataDir[IMAGE_DIRECTORY_ENTRY_RESOURCE].Size = (DWORD)rSize;
-	DWORD ddCount = this->getDataDirectoryCount();
-	for (DWORD i = 0; i < ddCount; i++) {
-		if (i == IMAGE_DIRECTORY_ENTRY_SECURITY) { // the virtual address of IMAGE_DIRECTORY_ENTRY_SECURITY is actually a file address, not a virtual address
+	this->dataDir[DataDirectory::RESOURCE].Size = (uint32_t)rSize;
+	uint32_t ddCount = this->getDataDirectoryCount();
+	for (uint32_t i = 0; i < ddCount; i++) {
+		if (i == DataDirectory::SECURITY) { // the virtual address of DataDirectory::SECURITY is actually a file address, not a virtual address
 			adjustAddr(this->dataDir[i].VirtualAddress, rSect->PointerToRawData, rRawSize, rRawSizeOld);
 			if (this->dataDir[i].VirtualAddress + this->dataDir[i].Size > fileSize)
 				fileSize = this->dataDir[i].VirtualAddress + this->dataDir[i].Size;
@@ -743,32 +636,30 @@ bool File::save() {
 	}
 	
 	// Update all section headers
-	for (WORD i = (WORD)rIndx; i < this->header->NumberOfSections; i++) {
-		if (strncmp((CHAR*)this->sections[i].Name, ".rsrc", IMAGE_SIZEOF_SHORT_NAME) == 0) {
-			this->sections[i].Misc.VirtualSize = (DWORD)rSize;
-			this->sections[i].SizeOfRawData = (DWORD)rRawSize;
+	for (uint16_t i = (uint16_t)rIndx; i < this->header->NumberOfSections; i++) {
+		if (strncmp((char*)this->sections[i].Name, ".rsrc", ARRAYSIZE(this->sections[i].Name)) == 0) {
+			this->sections[i].VirtualSize = (uint32_t)rSize;
+			this->sections[i].SizeOfRawData = (uint32_t)rRawSize;
 		} else {
 			adjustAddr(this->sections[i].VirtualAddress, rSect->VirtualAddress, rVirSize, rVirSizeOld);
 			adjustAddr(this->sections[i].PointerToRawData, rSect->PointerToRawData, rRawSize, rRawSizeOld);
 		}
 		adjustAddr(this->sections[i].PointerToLinenumbers, rSect->PointerToRawData, rRawSize, rRawSizeOld);
 		adjustAddr(this->sections[i].PointerToRelocations, rSect->PointerToRawData, rRawSize, rRawSizeOld);
-		if (this->sections[i].VirtualAddress + this->sections[i].Misc.VirtualSize > imageSize)
-			imageSize = this->sections[i].VirtualAddress + this->sections[i].Misc.VirtualSize;
+		if (this->sections[i].VirtualAddress + this->sections[i].VirtualSize > imageSize)
+			imageSize = this->sections[i].VirtualAddress + this->sections[i].VirtualSize;
 		if (this->sections[i].PointerToRawData + this->sections[i].SizeOfRawData > fileSize)
 			fileSize = this->sections[i].PointerToRawData + this->sections[i].SizeOfRawData;
 	}
 	
 	// Update the ImageSize
-	imageSize = (DWORD)roundUpTo(imageSize, sAlign);
-	if (is64bit)	this->nth64->OptionalHeader.SizeOfImage = imageSize;
-	else			this->nth32->OptionalHeader.SizeOfImage = imageSize;
+	this->opt->SizeOfImage = (uint32_t)roundUpTo(imageSize, sAlign);
 
 	// Increase file size (invalidates all local pointers to the file data)
 	if (fileSize > fileSizeOld && !this->setSize(fileSize))			{ free(rsrc); return false; }
 
 	// Move all sections after resources and save resources
-	LPBYTE dp = this->data + pntr;
+	bytes dp = this->data+pntr;
 	if (rRawSize != rRawSizeOld && fileSize-rRawSize-pntr > 0)
 		memmove(dp+rRawSize, dp+rRawSizeOld, fileSize-rRawSize-pntr);
 	if (rRawSize > rSize)

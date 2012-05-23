@@ -3,7 +3,7 @@
 :: This builds using MSVC VS90 (.NET 2.0)
 
 set FLAGS=/nologo /MDd /D _DEBUG /Zi /W4 /wd4201 /wd4480 /O2 /GS /GL /EHa /D _UNICODE /D UNICODE
-set FILES=PEFile.cpp PEFileResources.cpp
+set FILES=PEFile.cpp PEFileResources.cpp PEDataSource.cpp PEVersion.cpp
 
 echo Compiling 32-bit...
 call "%VS90COMNTOOLS%\..\..\VC\vcvarsall.bat" x86

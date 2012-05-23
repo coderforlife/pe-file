@@ -5,16 +5,16 @@
 
 :: -s
 set FLAGS=-Wall -Wno-unknown-pragmas -static-libgcc -static-libstdc++ -O3 -D UNICODE -D _UNICODE
-set FILES=PEFile.cpp PEFileResources.cpp
+set FILES=PEFile.cpp PEFileResources.cpp PEDataSource.cpp PEVersion.cpp
 
 echo Compiling 32-bit...
-i686-w64-mingw32-g++ %FLAGS% -c %FILES% -lVersion
+i686-w64-mingw32-g++ %FLAGS% -c %FILES%
 i686-w64-mingw32-ar rcs libPEFile.a *.o
 del /F /Q *.o >NUL 2>&1
 echo.
 
 echo Compiling 64-bit...
-x86_64-w64-mingw32-g++ %FLAGS% -c %FILES% -lVersion
+x86_64-w64-mingw32-g++ %FLAGS% -c %FILES%
 x86_64-w64-mingw32-ar rcs libPEFile64.a *.o
 del /F /Q *.o >NUL 2>&1
 pause
