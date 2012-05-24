@@ -21,6 +21,10 @@
 
 #define _CRT_SECURE_NO_WARNINGS
 
+#ifdef _MSC_VER
+#pragma warning(disable : 4201 4480) // nonstandard extension used: [nameless struct/union | specifying underlying type for enum]
+#endif
+
 #ifdef _WIN32
 #define USE_WINDOWS_API
 #elif !defined(__posix)
@@ -57,6 +61,7 @@ namespace PE {
 
 	inline static bool IsIntResID(const_resid r) { return (((size_t)r) >> 16) == 0; }
 	inline static resid MakeResID(uint16_t i) { return (resid)(size_t)i; }
+	inline static uint16_t ResID2Int(const_resid r) { return (uint16_t)(size_t)r; }
 	
 	static const void*const null = NULL;
 
@@ -241,7 +246,6 @@ namespace PE {
 	};
 
 	namespace Internal {
-		inline static uint16_t ResID2Int(const_resid r) { return (uint16_t)(size_t)r; }
 		#ifndef ARRAYSIZE
 		#define ARRAYSIZE(a) sizeof(a)/sizeof(a[0])
 		#endif
