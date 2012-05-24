@@ -21,28 +21,26 @@
 
 #include "PEDataTypes.h"
 
-#include <stdlib.h>
-
 namespace PE {
 	class DataSourceImp {
 	public:
 		virtual bool isreadonly() const = 0;
 		virtual void close() = 0;
 		virtual bool flush() = 0;
-		virtual pntr data() = 0;
+		virtual void* data() = 0;
 		virtual size_t size() const = 0;
 		virtual bool resize(size_t new_size) = 0;
 	};
 	
 	class RawDataSource : public DataSourceImp {
 		bool readonly;
-		pntr d, orig_data;
+		void *d, *orig_data;
 		size_t sz;
 	public:
-		RawDataSource(pntr data, size_t size, bool readonly = false);
+		RawDataSource(void* data, size_t size, bool readonly = false);
 		~RawDataSource();
 		virtual bool isreadonly() const;
-		virtual pntr data();
+		virtual void* data();
 		virtual size_t size() const;
 		virtual void close();
 		virtual bool resize(size_t new_size);
@@ -53,11 +51,11 @@ namespace PE {
 		bool readonly;
 		wchar_t original[LARGE_PATH];
 #ifdef USE_WINDOWS_API
-		pntr hFile, hMap;
+		void *hFile, *hMap;
 #else
 		int fd;
 #endif
-		pntr d;
+		void* d;
 		size_t sz;
 
 		bool map();
@@ -66,7 +64,7 @@ namespace PE {
 		MemoryMappedDataSource(const_str file, bool readonly = false);
 		~MemoryMappedDataSource();
 		virtual bool isreadonly() const;
-		virtual pntr data();
+		virtual void* data();
 		virtual size_t size() const;
 		virtual void close();
 		virtual bool resize(size_t new_size);
@@ -78,7 +76,7 @@ namespace PE {
 	class DataSource {
 		DataSourceImp* ds;
 		bool readonly;
-		pntr data;
+		void* data;
 		size_t sz;
 
 		inline void update() {
@@ -107,12 +105,12 @@ namespace PE {
 		//inline operator const_pntr() const { return this->data; }
 		//inline operator const_bytes() const { return (const_bytes)this->data; }
 
-		inline bytes operator +(const size_t& off) { return ((bytes)this->data) + off; }
-		inline const_bytes operator +(const size_t& off) const { return ((const_bytes)this->data) + off; }
+		inline       dyn_ptr<byte> operator +(const size_t& off)       { return dyn_ptr<byte>(&this->data, off); }
+		inline const dyn_ptr<byte> operator +(const size_t& off) const { return dyn_ptr<byte>(&this->data, off); }
 
 		inline ptrdiff_t operator -(const_bytes b) const { return (const_bytes)this->data - b; }
 
-		inline byte& operator[](const size_t& off) { return ((bytes)this->data)[off]; }
+		inline       byte& operator[](const size_t& off)       { return       ((bytes)this->data)[off]; }
 		inline const byte& operator[](const size_t& off) const { return ((const_bytes)this->data)[off]; }
 	};
 

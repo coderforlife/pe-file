@@ -43,7 +43,7 @@ namespace PE { namespace Version {
 	struct FileVersionBasicInfo {
 		static const uint32_t SIGNATURE = 0xFEEF04BD;
 
-		static FileVersionBasicInfo* Get(pntr ver);
+		static FileVersionBasicInfo* Get(void* ver);
 
 		uint32_t Signature;
 		SmallVersion StrucVersion;
@@ -119,7 +119,7 @@ namespace PE { namespace Version {
 
 	// This data is not modifiable (except the basic info), all strings are copies
 	struct FileVersionInfo {
-		FileVersionInfo(pntr ver);
+		FileVersionInfo(void* ver);
 
 		FileVersionBasicInfo* Basic;
 

@@ -40,23 +40,199 @@ typedef __int64 int64_t;
 #include <stdint.h>
 #endif
 
+#include <stdlib.h>
+
+#define CASSERT(pred)	switch(0){case 0:case pred:;}
+
 namespace PE {
 	typedef uint8_t byte;
-
 	typedef byte* bytes;
 	typedef const byte* const_bytes;
-	typedef void* pntr;
-	typedef const void* const_pntr;
 
 	typedef wchar_t* str;
 	typedef const wchar_t* const_str;
+
 	typedef wchar_t* resid;
 	typedef const wchar_t* const_resid;
+
 	inline static bool IsIntResID(const_resid r) { return (((size_t)r) >> 16) == 0; }
 	inline static resid MakeResID(uint16_t i) { return (resid)(size_t)i; }
+	
+	static const void*const null = NULL;
 
-	//class dyn_ptr<T> {
-	//};
+	// A class that acts as a pointer but automatically is updated when the underlying memory shifts
+	template<typename T> class dyn_ptr;
+	template<> class dyn_ptr<void>;
+	template<typename T> class dyn_ptr_base {
+		template<typename T2> friend class dyn_ptr;
+
+	protected:
+		void*const* base;
+		size_t off;
+		inline       T* get()       { return (      T*)((*(const_bytes*)this->base)+this->off); }
+		inline const T* get() const { return (const T*)((*(const_bytes*)this->base)+this->off); }
+	
+		template<typename T2> friend class dyn_ptr_base;
+
+		inline dyn_ptr_base() : base((void*const*)&null), off(0) { }
+		inline dyn_ptr_base(void*const* base, size_t off = 0) : base(base), off(off) { }
+		inline dyn_ptr_base(void*const* base, T* val)         : base(base), off((bytes)val - *(const_bytes*)base) { }
+
+	public:
+		inline operator       bool ()       { return this->get() != NULL; }
+		inline operator       bool () const { return this->get() != NULL; }
+		inline bool operator      !() const { return this->get() == NULL; }
+		inline operator       T*   ()       { return this->get(); }
+		inline operator const T*   () const { return this->get(); }
+
+		inline bool equals(const dyn_ptr_base<T>& b) const { return this->base == b.base && this->off == b.off; }
+
+		inline bool operator ==(const dyn_ptr_base<T>& b) const { return this->get() == b.get(); }
+		inline bool operator !=(const dyn_ptr_base<T>& b) const { return this->get() != b.get(); }
+		inline bool operator <=(const dyn_ptr_base<T>& b) const { return this->get() <= b.get(); }
+		inline bool operator >=(const dyn_ptr_base<T>& b) const { return this->get() >= b.get(); }
+		inline bool operator < (const dyn_ptr_base<T>& b) const { return this->get() <  b.get(); }
+		inline bool operator > (const dyn_ptr_base<T>& b) const { return this->get() >  b.get(); }
+		inline bool operator ==(const T* b) const { return this->get() == b; }
+		inline bool operator !=(const T* b) const { return this->get() != b; }
+		inline bool operator <=(const T* b) const { return this->get() <= b; }
+		inline bool operator >=(const T* b) const { return this->get() >= b; }
+		inline bool operator < (const T* b) const { return this->get() <  b; }
+		inline bool operator > (const T* b) const { return this->get() >  b; }
+		friend inline bool operator ==(const T* a, const dyn_ptr_base<T>& b) { return a == b.get(); }
+		friend inline bool operator !=(const T* a, const dyn_ptr_base<T>& b) { return a != b.get(); }
+		friend inline bool operator <=(const T* a, const dyn_ptr_base<T>& b) { return a <= b.get(); }
+		friend inline bool operator >=(const T* a, const dyn_ptr_base<T>& b) { return a >= b.get(); }
+		friend inline bool operator < (const T* a, const dyn_ptr_base<T>& b) { return a <  b.get(); }
+		friend inline bool operator > (const T* a, const dyn_ptr_base<T>& b) { return a >  b.get(); }
+		//TODO: inline bool operator ==(int b) const { return this->get() == b; }
+		//TODO: inline bool operator !=(int b) const { return this->get() == b; }
+		//TODO: friend inline bool operator ==(int a, const dyn_ptr_base<T>& b) { return a == b.get(); }
+		//TODO: friend inline bool operator !=(int a, const dyn_ptr_base<T>& b) { return a != b.get(); }
+	};
+	template<typename T> class dyn_ptr : public dyn_ptr_base<T> {
+	public:
+		inline dyn_ptr() : dyn_ptr_base<T>() { }
+		inline dyn_ptr(void*const* base, size_t off = 0) : dyn_ptr_base<T>(base, off) { }
+		inline dyn_ptr(void*const* base, T* val)         : dyn_ptr_base<T>(base, val) { }
+		                      inline dyn_ptr(const dyn_ptr<T>& b)                 : dyn_ptr_base<T>(b.base, b.off) { }
+		template<typename T2> inline dyn_ptr(const dyn_ptr_base<T2>& b)           : dyn_ptr_base<T>(b.base, b.off) { }
+		template<typename T2> inline dyn_ptr(const dyn_ptr_base<T2> base, T* val) : dyn_ptr_base<T>(base.base, val) { }
+		                      inline dyn_ptr<T>& operator =(const dyn_ptr<T>& b)       { this->base = b.base; this->off = b.off; return *this; }
+		template<typename T2> inline dyn_ptr<T>& operator =(const dyn_ptr_base<T2>& b) { this->base = b.base; this->off = b.off; return *this; }
+
+		inline operator       void*()       { return this->get(); }
+		inline operator const void*() const { return this->get(); }
+		template<typename T2> inline operator       dyn_ptr<T2>()       { return dyn_ptr<T2>(this->base, this->off); }
+		template<typename T2> inline operator const dyn_ptr<T2>() const { return dyn_ptr<T2>(this->base, this->off); }
+
+		inline bool operator ==(const dyn_ptr_base<void>& b) const { return this->get() == b.get(); }
+		inline bool operator !=(const dyn_ptr_base<void>& b) const { return this->get() != b.get(); }
+		inline bool operator <=(const dyn_ptr_base<void>& b) const { return this->get() <= b.get(); }
+		inline bool operator >=(const dyn_ptr_base<void>& b) const { return this->get() >= b.get(); }
+		inline bool operator < (const dyn_ptr_base<void>& b) const { return this->get() <  b.get(); }
+		inline bool operator > (const dyn_ptr_base<void>& b) const { return this->get() >  b.get(); }
+		inline bool operator ==(const void* b) const { return this->get() == b; }
+		inline bool operator !=(const void* b) const { return this->get() != b; }
+		inline bool operator <=(const void* b) const { return this->get() <= b; }
+		inline bool operator >=(const void* b) const { return this->get() >= b; }
+		inline bool operator < (const void* b) const { return this->get() <  b; }
+		inline bool operator > (const void* b) const { return this->get() >  b; }
+		friend inline bool operator ==(const void* a, const dyn_ptr_base<T>& b) { return a == b.get(); }
+		friend inline bool operator !=(const void* a, const dyn_ptr_base<T>& b) { return a != b.get(); }
+		friend inline bool operator <=(const void* a, const dyn_ptr_base<T>& b) { return a <= b.get(); }
+		friend inline bool operator >=(const void* a, const dyn_ptr_base<T>& b) { return a >= b.get(); }
+		friend inline bool operator < (const void* a, const dyn_ptr_base<T>& b) { return a <  b.get(); }
+		friend inline bool operator > (const void* a, const dyn_ptr_base<T>& b) { return a >  b.get(); }
+		
+		inline       T& operator *()        { return *this->get(); }
+		inline const T& operator *() const  { return *this->get(); }
+		inline       T* operator ->()       { return this->get();  }
+		inline const T* operator ->() const { return this->get();  }
+				
+		inline ptrdiff_t operator -(const dyn_ptr<T>& b) const { return this->get() - b.get(); }
+		inline ptrdiff_t operator -(const T* b)          const { return this->get() - b;       }
+		inline ptrdiff_t operator -(      T* b)          const { return this->get() - b;       }
+		friend inline ptrdiff_t operator -(const T* a, const dyn_ptr<T>& b) { return a - b.get(); }
+		friend inline ptrdiff_t operator -(      T* a, const dyn_ptr<T>& b) { return a - b.get(); }
+
+		inline dyn_ptr<T>& operator ++()    { this->off+=sizeof(T); return *this; }
+		inline dyn_ptr<T>& operator --()    { this->off-=sizeof(T); return *this; }
+		inline dyn_ptr<T>  operator ++(int) { dyn_ptr<T> p = dyn_ptr<T>(this->base, this->off); this->off+=sizeof(T); return p; }
+		inline dyn_ptr<T>  operator --(int) { dyn_ptr<T> p = dyn_ptr<T>(this->base, this->off); this->off-=sizeof(T); return p; }
+		
+		// [] accessors for many integer sizes, both signed and unsigned
+		#define ARRAY_ACCESSORS(I) \
+			inline       T& operator [](const I& i)       { return this->get()[i]; } \
+			inline const T& operator [](const I& i) const { return this->get()[i]; }
+		ARRAY_ACCESSORS(size_t)
+		ARRAY_ACCESSORS(ptrdiff_t)
+		#if SIZE_MAX > 0xffffffffffffffff
+			ARRAY_ACCESSORS(uint64_t)
+			ARRAY_ACCESSORS(int64_t)
+		#endif
+		#if SIZE_MAX > 0xffffffff
+			ARRAY_ACCESSORS(uint32_t)
+			ARRAY_ACCESSORS(int32_t)
+		#endif
+		#if SIZE_MAX > 0xffff
+			ARRAY_ACCESSORS(uint16_t)
+			ARRAY_ACCESSORS(int16_t)
+		#endif
+		#if SIZE_MAX > 0xff
+			ARRAY_ACCESSORS(uint8_t)
+			ARRAY_ACCESSORS(int8_t)
+		#endif
+		#undef ARRAY_ACCESSORS
+		
+		// +/- operations for many integer sizes, both signed and unsigned
+		#define PLUS_MINUS_OPS(I) \
+			inline       dyn_ptr<T>  operator + (const I& off)       { return dyn_ptr<T>(this->base, this->off + sizeof(T)*off); } \
+			inline const dyn_ptr<T>  operator + (const I& off) const { return dyn_ptr<T>(this->base, this->off + sizeof(T)*off); } \
+			inline       dyn_ptr<T>  operator - (const I& off)       { return dyn_ptr<T>(this->base, this->off - sizeof(T)*off); } \
+			inline const dyn_ptr<T>  operator - (const I& off) const { return dyn_ptr<T>(this->base, this->off - sizeof(T)*off); } \
+			inline       dyn_ptr<T>& operator +=(const I& off)       { this->off += sizeof(T)*off; return *this; } \
+			inline       dyn_ptr<T>& operator -=(const I& off)       { this->off -= sizeof(T)*off; return *this; }
+		PLUS_MINUS_OPS(size_t)
+		PLUS_MINUS_OPS(ptrdiff_t)
+		#if SIZE_MAX > 0xffffffffffffffff
+			PLUS_MINUS_OPS(uint64_t)
+			PLUS_MINUS_OPS(int64_t)
+		#endif
+		#if SIZE_MAX > 0xffffffff
+			PLUS_MINUS_OPS(uint32_t)
+			PLUS_MINUS_OPS(int32_t)
+		#endif
+		#if SIZE_MAX > 0xffff
+			PLUS_MINUS_OPS(uint16_t)
+			PLUS_MINUS_OPS(int16_t)
+		#endif
+		#if SIZE_MAX > 0xff
+			PLUS_MINUS_OPS(uint8_t)
+			PLUS_MINUS_OPS(int8_t)
+		#endif
+		#undef PLUS_MINUS_OPS
+
+		//TODO: are these possible?
+		// ~ &  |  ^  <<  >>
+		//   &= |= ^= <<= >>=
+		// ->* () , new new[] delete delete[]
+	};
+	template<> class dyn_ptr<void> : public dyn_ptr_base<void> {
+	public:
+		inline dyn_ptr() : dyn_ptr_base<void>() { }
+		inline dyn_ptr(void*const* base, size_t off = 0) : dyn_ptr_base<void>(base, off) { }
+		inline dyn_ptr(void*const* base, void* val)      : dyn_ptr_base<void>(base, val) { }
+		                      inline dyn_ptr(const dyn_ptr<void>& b)                 : dyn_ptr_base<void>(b.base, b.off) { }
+		template<typename T2> inline dyn_ptr(const dyn_ptr_base<T2>& b)              : dyn_ptr_base<void>(b.base, b.off) { }
+		template<typename T2> inline dyn_ptr(const dyn_ptr_base<T2> base, void* val) : dyn_ptr_base<void>(base.base, val) { }
+		                      inline dyn_ptr<void>& operator =(const dyn_ptr<void>& b)    { this->base = b.base; this->off = b.off; return *this; }
+		template<typename T2> inline dyn_ptr<void>& operator =(const dyn_ptr_base<T2>& b) { this->base = b.base; this->off = b.off; return *this; }
+
+		template<typename T2> inline operator       dyn_ptr<T2>()       { return dyn_ptr<T2>(this->base, this->off); }
+		template<typename T2> inline operator const dyn_ptr<T2>() const { return dyn_ptr<T2>(this->base, this->off); }
+	};
+	static const dyn_ptr<void> nulldp;
 
 	enum Overwrite {
 		ALWAYS, // always adds the resource, even if it already exists
@@ -76,7 +252,7 @@ namespace PE {
 		inline static size_t roundUpTo(size_t x, size_t mult) { size_t mod = x % mult; return (mod == 0) ? x : (x + mult - mod); }
 	}
 
-	const unsigned int LARGE_PATH = 32767;
+	static const unsigned int LARGE_PATH = 32767;
 
 	namespace Image {
 		#include "pshpack2.h"
@@ -373,8 +549,8 @@ namespace PE {
 		//
 		// Based relocation format.
 		//
-		typedef struct _IMAGE_BASE_RELOCATION {
-			typedef enum _IMAGE_REL_BASED_ : uint16_t {
+		struct BaseRelocation { // IMAGE_BASE_RELOCATION
+			enum RelBase : uint16_t { // IMAGE_REL_BASED_*
 				ABSOLUTE       = 0,
 				HIGH           = 1,
 				LOW            = 2,
@@ -384,12 +560,12 @@ namespace PE {
 				MIPS_JMPADDR16 = 9,
 				IA64_IMM64     = 9,
 				DIR64          = 10,
-			} RelBase;
+			};
 
 			uint32_t VirtualAddress;
 			uint32_t SizeOfBlock;
 		//  uint16_t TypeOffset[1];
-		} BaseRelocation;
+		};
 
 		//
 		// Resource Format.
@@ -437,27 +613,27 @@ namespace PE {
 	}
 
 	namespace ResType {
-		const const_resid CURSOR       = MakeResID(1);
-		const const_resid BITMAP       = MakeResID(2);
-		const const_resid ICON         = MakeResID(3);
-		const const_resid MENU         = MakeResID(4);
-		const const_resid DIALOG       = MakeResID(5);
-		const const_resid STRING       = MakeResID(6);
-		const const_resid FONTDIR      = MakeResID(7);
-		const const_resid FONT         = MakeResID(8);
-		const const_resid ACCELERATOR  = MakeResID(9);
-		const const_resid RCDATA       = MakeResID(10);
-		const const_resid MESSAGETABLE = MakeResID(11);
-		const const_resid GROUP_CURSOR = MakeResID(12);
-		const const_resid GROUP_ICON   = MakeResID(14);
-		const const_resid VERSION      = MakeResID(16);
-		const const_resid DLGINCLUDE   = MakeResID(17);
-		const const_resid PLUGPLAY     = MakeResID(19);
-		const const_resid VXD          = MakeResID(20);
-		const const_resid ANICURSOR    = MakeResID(21);
-		const const_resid ANIICON      = MakeResID(22);
-		const const_resid HTML         = MakeResID(23);
-		const const_resid MANIFEST     = MakeResID(24);
+		static const const_resid CURSOR       = MakeResID(1);
+		static const const_resid BITMAP       = MakeResID(2);
+		static const const_resid ICON         = MakeResID(3);
+		static const const_resid MENU         = MakeResID(4);
+		static const const_resid DIALOG       = MakeResID(5);
+		static const const_resid STRING       = MakeResID(6);
+		static const const_resid FONTDIR      = MakeResID(7);
+		static const const_resid FONT         = MakeResID(8);
+		static const const_resid ACCELERATOR  = MakeResID(9);
+		static const const_resid RCDATA       = MakeResID(10);
+		static const const_resid MESSAGETABLE = MakeResID(11);
+		static const const_resid GROUP_CURSOR = MakeResID(12);
+		static const const_resid GROUP_ICON   = MakeResID(14);
+		static const const_resid VERSION      = MakeResID(16);
+		static const const_resid DLGINCLUDE   = MakeResID(17);
+		static const const_resid PLUGPLAY     = MakeResID(19);
+		static const const_resid VXD          = MakeResID(20);
+		static const const_resid ANICURSOR    = MakeResID(21);
+		static const const_resid ANIICON      = MakeResID(22);
+		static const const_resid HTML         = MakeResID(23);
+		static const const_resid MANIFEST     = MakeResID(24);
 	}
 }
 

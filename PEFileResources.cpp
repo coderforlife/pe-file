@@ -45,9 +45,9 @@ inline static void free_id(resid id) { if (!IsIntResID(id)) free(id); }
 static ResourceDirectoryEntry *GetEntries(const_bytes data, size_t size, size_t offset, uint32_t *nEntries) {
 	if (offset + sizeof(ResourceDirectory) >= size) { throw resLoadFailure; }
 	ResourceDirectory dir = *(ResourceDirectory*)(data+offset);
-	offset += sizeof(ResourceDirectory);
 	*nEntries = dir.NumberOfIdEntries+dir.NumberOfNamedEntries;
-	if (offset + *nEntries*sizeof(ResourceDirectoryEntry) >= size) { throw resLoadFailure; }
+	offset += sizeof(ResourceDirectory);
+	if (offset + (*nEntries)*sizeof(ResourceDirectoryEntry) >= size) { throw resLoadFailure; }
 	return (ResourceDirectoryEntry*)(data+offset);
 }
 static resid GetResourceName(const_bytes data, size_t size, size_t offset, const ResourceDirectoryEntry & entry) {
@@ -268,11 +268,11 @@ bool Rsrc::exists(const_resid type, const_resid name, uint16_t *lang) const {
 	TypeMap::const_iterator iter = this->types.find((resid)type);
 	return iter == this->types.end() ? false : iter->second->exists(name, lang);
 }
-pntr Rsrc::get(const_resid type, const_resid name, uint16_t lang, size_t *size) const {
+void* Rsrc::get(const_resid type, const_resid name, uint16_t lang, size_t *size) const {
 	TypeMap::const_iterator iter = this->types.find((resid)type);
 	return iter == this->types.end() ? NULL : iter->second->get(name, lang, size);
 }
-pntr Rsrc::get(const_resid type, const_resid name, uint16_t *lang, size_t *size) const {
+void* Rsrc::get(const_resid type, const_resid name, uint16_t *lang, size_t *size) const {
 	TypeMap::const_iterator iter = this->types.find((resid)type);
 	return iter == this->types.end() ? NULL : iter->second->get(name, lang, size);
 }
@@ -288,7 +288,7 @@ bool Rsrc::remove(const_resid type, const_resid name, uint16_t lang) {
 	}
 	return b;
 }
-bool Rsrc::add(const_resid type, const_resid name, uint16_t lang, const_pntr data, size_t size, Overwrite overwrite) {
+bool Rsrc::add(const_resid type, const_resid name, uint16_t lang, const void* data, size_t size, Overwrite overwrite) {
 	TypeMap::iterator iter = this->types.find((resid)type);
 	if (iter == types.end() && (overwrite == ALWAYS || overwrite == NEVER)) {
 		//types.set(dup(type), new ResourceType(type, name, lang, data, size));
@@ -337,7 +337,7 @@ size_t Rsrc::getHeaderSize() const {
 	return size;
 }
 size_t Rsrc::getThisHeaderSize() const { return sizeof(ResourceDirectory)+this->types.size()*sizeof(ResourceDirectoryEntry); }
-pntr Rsrc::compile(size_t *size, uint32_t startVA) {
+void* Rsrc::compile(size_t *size, uint32_t startVA) {
 	this->cleanup();
 
 	size_t dataSize = this->getDataSize();
@@ -371,7 +371,7 @@ size_t Rsrc::getRESSize() const {
 		size += i->second->getRESSize();
 	return size;
 }
-pntr Rsrc::compileRES(size_t *size) {
+void* Rsrc::compileRES(size_t *size) {
 	this->cleanup();
 
 	*size = this->getRESSize();
@@ -398,7 +398,7 @@ ResourceType::ResourceType(const_resid type, const_bytes data, size_t size, uint
 		this->names[name] = new ResourceName(name, data, size, start, startVA, entries[i]);
 	}
 }
-ResourceType::ResourceType(const_resid type, const_resid name, uint16_t lang, const_pntr data, size_t size) : type(dup(type)) {
+ResourceType::ResourceType(const_resid type, const_resid name, uint16_t lang, const void* data, size_t size) : type(dup(type)) {
 	//this->names.set(dup(name), new ResourceName(name, lang, data, size));
 	this->names[dup(name)] = new ResourceName(name, lang, data, size);
 }
@@ -429,11 +429,11 @@ bool ResourceType::exists(const_resid name, uint16_t *lang) const {
 	NameMap::const_iterator iter = this->names.find((resid)name);
 	return iter == this->names.end() ? false : iter->second->exists(lang);
 }
-pntr ResourceType::get(const_resid name, uint16_t lang, size_t *size) const {
+void* ResourceType::get(const_resid name, uint16_t lang, size_t *size) const {
 	NameMap::const_iterator iter = this->names.find((resid)name);
 	return iter == this->names.end() ? NULL : iter->second->get(lang, size);
 }
-pntr ResourceType::get(const_resid name, uint16_t *lang, size_t *size) const {
+void* ResourceType::get(const_resid name, uint16_t *lang, size_t *size) const {
 	NameMap::const_iterator iter = this->names.find((resid)name);
 	return iter == this->names.end() ? NULL : iter->second->get(lang, size);
 }
@@ -449,7 +449,7 @@ bool ResourceType::remove(const_resid name, uint16_t lang) {
 	}
 	return b;
 }
-bool ResourceType::add(const_resid name, uint16_t lang, const_pntr data, size_t size, Overwrite overwrite) {
+bool ResourceType::add(const_resid name, uint16_t lang, const void* data, size_t size, Overwrite overwrite) {
 	NameMap::iterator iter = this->names.find((resid)name);
 	if (iter == this->names.end() && (overwrite == ALWAYS || overwrite == NEVER)) {
 		//this->names.set(dup(name), new ResourceName(name, lang, data, size));
@@ -530,7 +530,7 @@ ResourceName::ResourceName(const_resid name, const_bytes data, size_t size, uint
 		//this->langs.set(entries[i].Id, new ResourceLang(entries[i].Id, data, size, start, startVA, entries[i]));
 		this->langs[entries[i].Id] = new ResourceLang(entries[i].Id, data, size, start, startVA, entries[i]);
 }
-ResourceName::ResourceName(const_resid name, uint16_t lang, const_pntr data, size_t size) : name(dup(name)) {
+ResourceName::ResourceName(const_resid name, uint16_t lang, const void* data, size_t size) : name(dup(name)) {
 	//this->langs.set(lang, new ResourceLang(lang, data, size));
 	this->langs[lang] = new ResourceLang(lang, data, size);
 }
@@ -559,11 +559,11 @@ bool ResourceName::exists(uint16_t *lang) const {
 	}
 	return false;
 }
-pntr ResourceName::get(uint16_t lang, size_t *size) const {
+void* ResourceName::get(uint16_t lang, size_t *size) const {
 	LangMap::const_iterator iter = this->langs.find(lang);
 	return iter == this->langs.end() ? NULL : iter->second->get(size);
 }
-pntr ResourceName::get(uint16_t *lang, size_t *size) const {
+void* ResourceName::get(uint16_t *lang, size_t *size) const {
 	if (this->langs.size() > 0) {
 		LangMap::const_iterator iter = this->langs.begin();
 		if (lang) *lang = iter->first;
@@ -579,7 +579,7 @@ bool ResourceName::remove(uint16_t lang) {
 	this->langs.erase(iter);
 	return true;
 }
-bool ResourceName::add(uint16_t lang, const_pntr data, size_t size, Overwrite overwrite) {
+bool ResourceName::add(uint16_t lang, const void* data, size_t size, Overwrite overwrite) {
 	LangMap::iterator iter = this->langs.find(lang);
 	if (iter == this->langs.end() && (overwrite == ALWAYS || overwrite == NEVER)) {
 		//this->langs.set(lang, new ResourceLang(lang, data, size));
@@ -663,13 +663,13 @@ ResourceLang::ResourceLang(uint16_t lang, const_bytes data, size_t size, uint32_
 	if (this->length == 0) { return; }
 	memcpy(this->data, data+start+de.OffsetToData-startVA, this->length);
 }
-ResourceLang::ResourceLang(uint16_t lang, const_pntr data, size_t size) : lang(lang), length(size) {
+ResourceLang::ResourceLang(uint16_t lang, const void* data, size_t size) : lang(lang), length(size) {
 	this->data = memcpy(malloc(size), data, length);
 }
 ResourceLang::~ResourceLang() { free(this->data); }
 const_resid ResourceLang::getId() const { return MakeResID(this->lang); }
-pntr ResourceLang::get(size_t *size) const { return memcpy(malloc(this->length), this->data, *size = this->length); }
-bool ResourceLang::set(const_pntr data, size_t size) {
+void* ResourceLang::get(size_t *size) const { return memcpy(malloc(this->length), this->data, *size = this->length); }
+bool ResourceLang::set(const void* data, size_t size) {
 	if (this->length != size)
 	{
 		free(this->data);

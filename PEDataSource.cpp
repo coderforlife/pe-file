@@ -36,7 +36,7 @@
 
 using namespace PE;
 
-RawDataSource::RawDataSource(pntr data, size_t size, bool readonly) : readonly(readonly), orig_data(data), sz(size) {
+RawDataSource::RawDataSource(void* data, size_t size, bool readonly) : readonly(readonly), orig_data(data), sz(size) {
 	if (readonly) {
 #ifdef USE_WINDOWS_API
 		DWORD old_protect = 0;
@@ -53,7 +53,7 @@ RawDataSource::RawDataSource(pntr data, size_t size, bool readonly) : readonly(r
 RawDataSource::~RawDataSource() { this->close(); }
 bool RawDataSource::isreadonly() const { return this->readonly; };
 bool RawDataSource::flush() { return true; }
-pntr RawDataSource::data() { return this->d; }
+void* RawDataSource::data() { return this->d; }
 size_t RawDataSource::size() const { return this->sz; }
 void RawDataSource::close() {
 	if (this->d) {
@@ -90,9 +90,9 @@ bool RawDataSource::resize(size_t new_size) {
 #include <map>
 #include <vector>
 using namespace std;
-typedef map<const_str, vector<pntr> > MMFs;
+typedef map<const_str, vector<void*> > MMFs;
 static MMFs mmfs;
-static void _RemoveMMF(MMFs &mmfs, const_str file, pntr x) {
+static void _RemoveMMF(MMFs &mmfs, const_str file, void* x) {
 	MMFs::iterator v = mmfs.find(file);
 	if (v != mmfs.end()) {
 		size_t size = v->second.size();
@@ -110,14 +110,14 @@ static void _RemoveMMF(MMFs &mmfs, const_str file, pntr x) {
 		}
 	}
 }
-static pntr AddMMF   (const_str file, pntr mm) { if (mm != NULL && mm != (pntr)-1) { mmfs[file].push_back(mm); } return mm; }
-static void RemoveMMF(const_str file, pntr mm) { _RemoveMMF(mmfs, file, mm); }
+static void* AddMMF  (const_str file, void* mm) { if (mm != NULL && mm != (void*)-1) { mmfs[file].push_back(mm); } return mm; }
+static void RemoveMMF(const_str file, void* mm) { _RemoveMMF(mmfs, file, mm); }
 
 #ifdef USE_WINDOWS_API
 static MMFs mmfViews;
 typedef BOOL (WINAPI *UNMAP_OR_CLOSE)(void*);
-static pntr AddMMFView(const_str file, pntr view)    { if (view != NULL) mmfViews[file].push_back(view); return view; }
-static void RemoveMMFView(const_str file, pntr view) { _RemoveMMF(mmfViews, file, view); }
+static void* AddMMFView(const_str file, void* view)   { if (view != NULL) mmfViews[file].push_back(view); return view; }
+static void RemoveMMFView(const_str file, void* view) { _RemoveMMF(mmfViews, file, view); }
 static void _UnmapAll(MMFs &mmfs, const_str file, UNMAP_OR_CLOSE func) {
 	MMFs::iterator v = mmfs.find(file);
 	if (v != mmfs.end()) {
@@ -215,7 +215,7 @@ bool MemoryMappedDataSource::flush() {
 #endif
 }
 
-pntr MemoryMappedDataSource::data() { return this->d; }
+void* MemoryMappedDataSource::data() { return this->d; }
 size_t MemoryMappedDataSource::size() const { return this->sz; }
 void MemoryMappedDataSource::close() {
 	this->unmap();

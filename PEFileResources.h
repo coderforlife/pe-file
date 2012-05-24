@@ -54,19 +54,19 @@ class ResourceLang : Resource {
 	friend class ResourceName;
 
 	uint16_t lang;
-	pntr data;
+	void* data;
 	size_t length;
 
 	ResourceLang(uint16_t lang, const_bytes data, size_t size, uint32_t start, uint32_t startVA, Image::ResourceDirectoryEntry entry);
-	ResourceLang(uint16_t lang, const_pntr data, size_t size);
+	ResourceLang(uint16_t lang, const void* data, size_t size);
 public:
 	~ResourceLang();
 
 	const_resid getId() const;
 
 	bool isLoaded() const;
-	pntr get(size_t* size) const; // must be freed
-	bool set(const_pntr data, size_t size);
+	void* get(size_t* size) const; // must be freed
+	bool set(const void* data, size_t size);
 
 private:
 	virtual size_t getDataSize() const;
@@ -88,7 +88,7 @@ class ResourceName : Resource {
 	LangMap langs;
 
 	ResourceName(const_resid name, const_bytes data, size_t size, uint32_t start, uint32_t startVA, Image::ResourceDirectoryEntry entry);
-	ResourceName(const_resid name, uint16_t lang, const_pntr data, size_t size);
+	ResourceName(const_resid name, uint16_t lang, const void* data, size_t size);
 public:
 	~ResourceName();
 
@@ -96,10 +96,10 @@ public:
 
 	bool exists(uint16_t lang) const;
 	bool exists(uint16_t* lang) const;
-	pntr get(uint16_t lang, size_t* size) const;
-	pntr get(uint16_t* lang, size_t* size) const;
+	void* get(uint16_t lang, size_t* size) const;
+	void* get(uint16_t* lang, size_t* size) const;
 	bool remove(uint16_t lang);
-	bool add(uint16_t lang, const_pntr data, size_t size, Overwrite overwrite = ALWAYS);
+	bool add(uint16_t lang, const void* data, size_t size, Overwrite overwrite = ALWAYS);
 
 	bool isEmpty() const;
 	
@@ -129,7 +129,7 @@ class ResourceType : Resource {
 	NameMap names;
 
 	ResourceType(const_resid type, const_bytes data, size_t size, uint32_t start, uint32_t startVA, Image::ResourceDirectoryEntry entry);
-	ResourceType(const_resid type, const_resid name, uint16_t lang, const_pntr data, size_t size);
+	ResourceType(const_resid type, const_resid name, uint16_t lang, const void* data, size_t size);
 public:
 	~ResourceType();
 
@@ -137,10 +137,10 @@ public:
 
 	bool exists(const_resid name, uint16_t lang) const;
 	bool exists(const_resid name, uint16_t* lang) const;
-	pntr get (const_resid name, uint16_t lang, size_t* size) const;
-	pntr get (const_resid name, uint16_t* lang, size_t* size) const;
+	void* get (const_resid name, uint16_t lang, size_t* size) const;
+	void* get (const_resid name, uint16_t* lang, size_t* size) const;
 	bool remove(const_resid name, uint16_t lang);
-	bool add(const_resid name, uint16_t lang, const_pntr data, size_t size, Overwrite overwrite = ALWAYS);
+	bool add(const_resid name, uint16_t lang, const void* data, size_t size, Overwrite overwrite = ALWAYS);
 
 	bool isEmpty() const;
 	
@@ -181,10 +181,10 @@ public:
 
 	bool exists(const_resid type, const_resid name, uint16_t lang) const;
 	bool exists(const_resid type, const_resid name, uint16_t* lang) const;
-	pntr get (const_resid type, const_resid name, uint16_t lang, size_t* size) const;
-	pntr get (const_resid type, const_resid name, uint16_t* lang, size_t* size) const;
+	void* get (const_resid type, const_resid name, uint16_t lang, size_t* size) const;
+	void* get (const_resid type, const_resid name, uint16_t* lang, size_t* size) const;
 	bool remove(const_resid type, const_resid name, uint16_t lang);
-	bool add(const_resid type, const_resid name, uint16_t lang, const_pntr data, size_t size, Overwrite overwrite = ALWAYS);
+	bool add(const_resid type, const_resid name, uint16_t lang, const void* data, size_t size, Overwrite overwrite = ALWAYS);
 	
 	bool isEmpty() const;
 	
@@ -196,8 +196,8 @@ public:
 	std::vector<uint16_t> getLangs(const_resid type, const_resid name) const;
 
 	bool cleanup();
-	pntr compile(size_t* size, uint32_t startVA); // calls cleanup
-	pntr compileRES(size_t* size); // calls cleanup
+	void* compile(size_t* size, uint32_t startVA); // calls cleanup
+	void* compileRES(size_t* size); // calls cleanup
 
 private:
 	virtual size_t getDataSize() const;

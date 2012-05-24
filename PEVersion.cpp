@@ -54,7 +54,7 @@ struct Block32 {
 };
 typedef std::vector<Block32>::iterator B32iter;
 
-static Block16 GetBlock16(const_pntr ver, bool recurse) {
+static Block16 GetBlock16(const void* ver, bool recurse) {
 	uint16_t* words = (uint16_t*)ver;
 
 	Block16 b = { words[0], words[1], (char*)(words+2) };
@@ -75,7 +75,7 @@ static Block16 GetBlock16(const_pntr ver, bool recurse) {
 	return b;
 }
 
-static Block32 GetBlock32(const_pntr ver, bool recurse) {
+static Block32 GetBlock32(const void* ver, bool recurse) {
 	uint16_t* words = (uint16_t*)ver;
 
 	Block32 b = { words[0], words[1], words[2], (wchar_t*)(words+3) };
@@ -102,9 +102,9 @@ static FileVersionBasicInfo *GetFileVersionBasicInfo(Block32 root) {
 	if (v->Signature != FileVersionBasicInfo::SIGNATURE || v->StrucVersion.Major != 1 || v->StrucVersion.Minor != 0) { return NULL; } // error!
 	return v;
 }
-FileVersionBasicInfo *FileVersionBasicInfo::Get(pntr ver) { return ver ? GetFileVersionBasicInfo(GetBlock32(ver, false)) : NULL; }
+FileVersionBasicInfo *FileVersionBasicInfo::Get(void* ver) { return ver ? GetFileVersionBasicInfo(GetBlock32(ver, false)) : NULL; }
 
-FileVersionInfo::FileVersionInfo(pntr ver) : Basic(NULL) {
+FileVersionInfo::FileVersionInfo(void* ver) : Basic(NULL) {
 	if (ver == NULL) { return; }
 	Block32 root = GetBlock32(ver, true);
 	this->Basic = GetFileVersionBasicInfo(root);
