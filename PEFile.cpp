@@ -108,11 +108,10 @@ void* File::GetResourceDirect(void* _data, const_resid type, const_resid name) {
 	const DOSHeader *dosh = (DOSHeader*)data;
 	if (dosh->e_magic != DOSHeader::SIGNATURE)				{ return NULL; }
 	int32_t peOffset = dosh->e_lfanew;
-	const NTHeaders32 *nth32 = (NTHeaders32*)(data+peOffset);
-	//const NTHeaders64 *nth64 = (NTHeaders64*)(data+peOffset);
-	const FileHeader* header = &nth32->FileHeader; // identical for 32 and 64 bits
-	const OptionalHeader* opt = &nth32->OptionalHeader;
-	if (nth32->Signature != NTHeaders::SIGNATURE)			{ return NULL; }
+	const NTHeaders32 *nth = (NTHeaders*)(data+peOffset);
+	if (nth->Signature != NTHeaders::SIGNATURE)				{ return NULL; }
+	const FileHeader* header = &nth->FileHeader; // identical for 32 and 64 bits
+	const OptionalHeader* opt = &nth->OptionalHeader;
 	bool is64bit = !(header->Characteristics & FileHeader::MACHINE_32BIT);
 	if ((is64bit && opt->Magic != OptionalHeader64::SIGNATURE) || (!is64bit && opt->Magic != OptionalHeader32::SIGNATURE)) { return NULL; }
 

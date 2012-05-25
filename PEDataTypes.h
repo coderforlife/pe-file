@@ -547,7 +547,7 @@ namespace PE {
 			uint32_t PointerToLinenumbers;
 			uint16_t NumberOfRelocations;
 			uint16_t NumberOfLinenumbers;
-			uint32_t Characteristics;
+			CharacteristicFlags Characteristics;
 		};
 		
 		//
