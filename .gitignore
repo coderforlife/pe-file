@@ -11,3 +11,6 @@
 *.lai
 *.la
 *.a
+
+# Compiled Symbol files
+*.pdb

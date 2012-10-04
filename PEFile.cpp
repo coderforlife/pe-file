@@ -108,7 +108,7 @@ void* File::GetResourceDirect(void* _data, const_resid type, const_resid name) {
 	const DOSHeader *dosh = (DOSHeader*)data;
 	if (dosh->e_magic != DOSHeader::SIGNATURE)				{ return NULL; }
 	int32_t peOffset = dosh->e_lfanew;
-	const NTHeaders32 *nth = (NTHeaders*)(data+peOffset);
+	const NTHeaders32 *nth = (NTHeaders32*)(data+peOffset);
 	if (nth->Signature != NTHeaders::SIGNATURE)				{ return NULL; }
 	const FileHeader* header = &nth->FileHeader; // identical for 32 and 64 bits
 	const OptionalHeader* opt = &nth->OptionalHeader;
