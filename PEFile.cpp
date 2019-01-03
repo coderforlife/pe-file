@@ -347,9 +347,9 @@ dyn_ptr<SectionHeader> File::createSection(int i, const char *name, uint32_t roo
 	if (!at_end && !this->move(pos, header_used_size-pos, sizeof(SectionHeader)))	{ return nulldp; }
 	if (!this->set(&s, sizeof(SectionHeader), pos))									{ return nulldp; }
 	++this->header->NumberOfSections;
-	for (uint16_t s = (uint16_t)i + 1; s <= nSects; ++s) { // update the location and VA of all subsequent sections
-		this->sections[s].VirtualAddress += move_va;
-		this->sections[s].PointerToRawData += raw_size;
+	for (uint16_t si = (uint16_t)i + 1; si <= nSects; ++si) { // update the location and VA of all subsequent sections
+		this->sections[si].VirtualAddress += move_va;
+		this->sections[si].PointerToRawData += raw_size;
 	}
 	uint32_t ddCount = this->getDataDirectoryCount();
 	for (uint32_t d = 0; d < ddCount; ++d) { // update the VA of all subsequent data directories
@@ -410,7 +410,7 @@ bool File::resourceExists(const_resid type, const_resid name, uint16_t* lang) co
 void* File::getResource(const_resid type, const_resid name, uint16_t lang, size_t* size) const { return this->res->get(type, name, lang, size); }
 void* File::getResource(const_resid type, const_resid name, uint16_t* lang, size_t* size) const { return this->res->get(type, name, lang, size); }
 bool File::removeResource(const_resid type, const_resid name, uint16_t lang) { return !this->data.isreadonly() && this->res->remove(type, name, lang); }
-bool File::addResource(const_resid type, const_resid name, uint16_t lang, const void* data, size_t size, Overwrite overwrite) { return !this->data.isreadonly() && this->res->add(type, name, lang, data, size, overwrite); }
+bool File::addResource(const_resid type, const_resid name, uint16_t lang, const void* dat, size_t size, Overwrite overwrite) { return !this->data.isreadonly() && this->res->add(type, name, lang, dat, size, overwrite); }
 #pragma endregion
 
 #pragma region Direct Data Functions
@@ -536,7 +536,7 @@ bool File::removeRelocs(uint32_t start, uint32_t end, bool reverse) {
 	if (!sect)									{ return true; } // no relocations exist, so nothing to remove!
 
 	uint32_t size = sect->SizeOfRawData, pntr = sect->PointerToRawData;
-	dyn_ptr<byte> data = this->get(pntr);
+	dyn_ptr<byte> dat = this->get(pntr);
 
 	//ABSOLUTE	= IMAGE_REL_I386_ABSOLUTE or IMAGE_REL_AMD64_ABSOLUTE
 	//HIGHLOW	=> ??? or IMAGE_REL_AMD64_ADDR32NB (32-bit address w/o image base (RVA))
@@ -545,8 +545,8 @@ bool File::removeRelocs(uint32_t start, uint32_t end, bool reverse) {
 
 	// Remove everything that is between start and end
 	// We do a thorough search for possible relocations and do not assume that they are in order
-	dyn_ptr<void> entry_end = data + size;
-	for (dyn_ptr<BaseRelocation> entry = (dyn_ptr<BaseRelocation>)data; entry < entry_end && entry->SizeOfBlock > 0; entry = NEXT_RELOCS(entry)) {
+	dyn_ptr<void> entry_end = dat + size;
+	for (dyn_ptr<BaseRelocation> entry = (dyn_ptr<BaseRelocation>)dat; entry < entry_end && entry->SizeOfBlock > 0; entry = NEXT_RELOCS(entry)) {
 
 		// Check that the ranges overlap
 		if (entry->VirtualAddress+0xFFF < start || entry->VirtualAddress > end) continue;

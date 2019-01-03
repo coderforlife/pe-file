@@ -669,29 +669,29 @@ ResourceLang::ResourceLang(uint16_t lang, const void* data, size_t size) : lang(
 ResourceLang::~ResourceLang() { free(this->data); }
 const_resid ResourceLang::getId() const { return MakeResID(this->lang); }
 void* ResourceLang::get(size_t *size) const { return memcpy(malloc(this->length), this->data, *size = this->length); }
-bool ResourceLang::set(const void* data, size_t size) {
+bool ResourceLang::set(const void* dat, size_t size) {
 	if (this->length != size)
 	{
 		free(this->data);
 		this->data = malloc(this->length = size);
 	}
-	memcpy(this->data, data, size);
+	memcpy(this->data, dat, size);
 	return true;
 }
 size_t ResourceLang::getDataSize() const		{ return this->length; }
 size_t ResourceLang::getHeaderSize() const		{ return sizeof(ResourceDataEntry); }
 size_t ResourceLang::getThisHeaderSize() const	{ return sizeof(ResourceDataEntry); }
-void ResourceLang::writeData(bytes data, size_t& posDataEntry, size_t& posData, size_t startVA) const {
+void ResourceLang::writeData(bytes dat, size_t& posDataEntry, size_t& posData, size_t startVA) const {
 	ResourceDataEntry de = {(uint32_t)(posData+startVA), (uint32_t)this->length, 0, 0}; // needs to be an RVA
-	memcpy(data+posDataEntry, &de, sizeof(ResourceDataEntry));
+	memcpy(dat+posDataEntry, &de, sizeof(ResourceDataEntry));
 	posDataEntry += sizeof(ResourceDataEntry);
-	memcpy(data+posData, this->data, this->length);
+	memcpy(dat+posData, this->data, this->length);
 	posData += roundUpTo<4>(this->length);
 }
 size_t ResourceLang::getRESSize(size_t addl_hdr_size) const { return roundUpTo<4>(this->length + RESHeaderSize + addl_hdr_size); }
-void ResourceLang::writeRESData(bytes data, size_t& pos, const_resid type, const_resid name) const {
-	pos += WriteRESHeader(data+pos, type, name, this->lang, this->length);
-	memcpy(data+pos, this->data, this->length);
+void ResourceLang::writeRESData(bytes dat, size_t& pos, const_resid type, const_resid name) const {
+	pos += WriteRESHeader(dat+pos, type, name, this->lang, this->length);
+	memcpy(dat+pos, this->data, this->length);
 	pos = roundUpTo<4>(pos + this->length);
 }
 #pragma endregion

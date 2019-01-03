@@ -92,14 +92,14 @@ bool RawDataSource::resize(size_t new_size) {
 using namespace std;
 typedef map<const_str, vector<void*> > MMFs;
 static MMFs mmfs;
-static void _RemoveMMF(MMFs &mmfs, const_str file, void* x) {
-	MMFs::iterator v = mmfs.find(file);
-	if (v != mmfs.end()) {
+static void _RemoveMMF(MMFs &mmfs_, const_str file, void* x) {
+	MMFs::iterator v = mmfs_.find(file);
+	if (v != mmfs_.end()) {
 		size_t size = v->second.size();
 		for (size_t i = 0; i < size; ++i) {
 			if (v->second[i] == x) {
 				if (size == 1) {
-					mmfs.erase(v);
+					mmfs_.erase(v);
 				} else {
 					if (i != size-1) // move the last element up
 						v->second[i] = v->second[size-1];
@@ -118,13 +118,13 @@ static MMFs mmfViews;
 typedef BOOL (WINAPI *UNMAP_OR_CLOSE)(void*);
 static void* AddMMFView(const_str file, void* view)   { if (view != NULL) mmfViews[file].push_back(view); return view; }
 static void RemoveMMFView(const_str file, void* view) { _RemoveMMF(mmfViews, file, view); }
-static void _UnmapAll(MMFs &mmfs, const_str file, UNMAP_OR_CLOSE func) {
-	MMFs::iterator v = mmfs.find(file);
-	if (v != mmfs.end()) {
+static void _UnmapAll(MMFs &mmfs_, const_str file, UNMAP_OR_CLOSE func) {
+	MMFs::iterator v = mmfs_.find(file);
+	if (v != mmfs_.end()) {
 		size_t size = v->second.size();
 		for (size_t i = 0; i < size; ++i)
 			func(v->second[i]);
-		mmfs.erase(v);
+		mmfs_.erase(v);
 	}
 }
 void MemoryMappedDataSource::UnmapAllViewsOfFile(const_str file) {

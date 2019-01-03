@@ -118,8 +118,8 @@ namespace PE {
 	template<typename T> class dyn_ptr : public dyn_ptr_base<T> {
 	public:
 		inline dyn_ptr() : dyn_ptr_base<T>() { }
-		inline dyn_ptr(void*const* base, size_t off = 0) : dyn_ptr_base<T>(base, off) { }
-		inline dyn_ptr(void*const* base, T* val)         : dyn_ptr_base<T>(base, val) { }
+		inline dyn_ptr(void*const* base, size_t off_ = 0) : dyn_ptr_base<T>(base, off_) { }
+		inline dyn_ptr(void*const* base, T* val)          : dyn_ptr_base<T>(base, val) { }
 		                      inline dyn_ptr(const dyn_ptr<T>& b)                 : dyn_ptr_base<T>(b.base, b.off) { }
 		template<typename T2> inline dyn_ptr(const dyn_ptr_base<T2>& b)           : dyn_ptr_base<T>(b.base, b.off) { }
 		template<typename T2> inline dyn_ptr(const dyn_ptr_base<T2> base, T* val) : dyn_ptr_base<T>(base.base, val) { }
@@ -192,12 +192,12 @@ namespace PE {
 		
 		// +/- operations for many integer sizes, both signed and unsigned
 		#define PLUS_MINUS_OPS(I) \
-			inline       dyn_ptr<T>  operator + (const I& off)       { return dyn_ptr<T>(this->base, this->off + sizeof(T)*off); } \
-			inline const dyn_ptr<T>  operator + (const I& off) const { return dyn_ptr<T>(this->base, this->off + sizeof(T)*off); } \
-			inline       dyn_ptr<T>  operator - (const I& off)       { return dyn_ptr<T>(this->base, this->off - sizeof(T)*off); } \
-			inline const dyn_ptr<T>  operator - (const I& off) const { return dyn_ptr<T>(this->base, this->off - sizeof(T)*off); } \
-			inline       dyn_ptr<T>& operator +=(const I& off)       { this->off += sizeof(T)*off; return *this; } \
-			inline       dyn_ptr<T>& operator -=(const I& off)       { this->off -= sizeof(T)*off; return *this; }
+			inline       dyn_ptr<T>  operator + (const I& off_)       { return dyn_ptr<T>(this->base, this->off + sizeof(T)*off_); } \
+			inline const dyn_ptr<T>  operator + (const I& off_) const { return dyn_ptr<T>(this->base, this->off + sizeof(T)*off_); } \
+			inline       dyn_ptr<T>  operator - (const I& off_)       { return dyn_ptr<T>(this->base, this->off - sizeof(T)*off_); } \
+			inline const dyn_ptr<T>  operator - (const I& off_) const { return dyn_ptr<T>(this->base, this->off - sizeof(T)*off_); } \
+			inline       dyn_ptr<T>& operator +=(const I& off_)       { this->off += sizeof(T)*off_; return *this; } \
+			inline       dyn_ptr<T>& operator -=(const I& off_)       { this->off -= sizeof(T)*off_; return *this; }
 		PLUS_MINUS_OPS(size_t)
 		PLUS_MINUS_OPS(ptrdiff_t)
 		#if SIZE_MAX > 0xffffffffffffffff
