@@ -10,6 +10,7 @@
 @if not "%VS140COMNTOOLS%"=="" set DIR=%VS140COMNTOOLS%
 @if "%DIR%"=="" (
 	echo Could not find a Visual Studio toolkit
+	pause
 	goto :EOF
 )
 
